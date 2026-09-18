@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en" style="background-color: #070709; color-scheme: dark;">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#0A0A0D" />
+    <meta name="description" content="Audenic — Premium music and video player with DJ studio, AI lyrics, equalizer, reels, and live radio streaming" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Audenic" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="manifest" href="./manifest.json" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script>
+      window.isNative = function() {
+        return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+      };
+      window.updatePosition = window.updatePosition || function() {};
+      window.nativeUpdatePosition = window.nativeUpdatePosition || function() {};
+    </script>
+    <title>Audenic — Music & Video Player | DJ Studio, Radio & AI Lyrics</title>
+  </head>
+  <body style="background-color: #070709; color: #fff; margin: 0; color-scheme: dark;">
+    <div id="root"></div>
+    <div id="fallback" style="color: #555; position: absolute; top: 20px; left: 20px; font-size: 10px; z-index: 9999;">
+      Audenic Loading...
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

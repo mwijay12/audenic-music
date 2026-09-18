@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Audenic</string>
+    <string name="title_activity_main">Audenic</string>
+    <string name="package_name">com.audenic.app</string>
+    <string name="custom_url_scheme">com.audenic.app</string>
+    <string name="server_client_id">484959363323-517ah4jl19ovdvfvgjufl78l60da1863.apps.googleusercontent.com</string>
+    <string name="default_web_client_id">484959363323-517ah4jl19ovdvfvgjufl78l60da1863.apps.googleusercontent.com</string>
+</resources>

@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Production build artifacts & binaries
+dist/
+build/
+out/
+*.exe
+*.zip
+.kilocode/
+
+# Environment and secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+
+# Tauri Rust build artifacts
+src-tauri/target/
+src-tauri/gen/
+
+# Capacitor Android/iOS local generated files
+android/.gradle/
+android/app/build/
+android/build/
+android/captures/
+ios/App/build/
+ios/App/Pods/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.log
+
+# Editor & OS files
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db

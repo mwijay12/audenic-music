@@ -1,0 +1,27 @@
+{
+  "short_name": "Audenic",
+  "name": "Audenic — Music & Video Player",
+  "description": "Premium music and video player with DJ studio, AI lyrics, equalizer, reels, and radio streaming",
+  "categories": ["music", "entertainment"],
+  "icons": [
+    {
+      "src": "favicon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512 192x192 64x64 32x32"
+    },
+    {
+      "src": "icon.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": ".",
+  "background_color": "#0A0A0D",
+  "theme_color": "#0A0A0D",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone"],
+  "orientation": "portrait",
+  "scope": ".",
+  "lang": "en"
+}
