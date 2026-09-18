@@ -99,7 +99,7 @@ npm run tauri:dev
 
 ### Production Desktop Executable (Windows)
 
-To build the native Windows installer and standalone binary:
+To build the native Windows installer and standalone binary on a Windows workstation:
 ```bash
 npm run tauri:build
 ```
@@ -109,6 +109,31 @@ The build outputs will be generated in `src-tauri/target/release/`:
   *(Recommended for end users — includes desktop shortcut, Start Menu integration, and file associations for MP3/FLAC/WAV/MP4).*
 - **Portable Executable**: `src-tauri/target/release/audenic.exe`  
   *(Standalone portable binary that runs instantly without installation).*
+
+### Production Desktop Executable (Linux)
+
+To build the native Linux packages on an Ubuntu/Debian environment:
+```bash
+# 1. Install prerequisites
+sudo apt-get update
+sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+# 2. Build binaries
+npm run tauri:build
+```
+
+The build outputs will be generated in `src-tauri/target/release/bundle/`:
+- **Universal AppImage**: `bundle/appimage/Audenic_2.0.0_amd64.AppImage`  
+  *(Universal portable package compatible with Ubuntu, Debian, Fedora, Arch, Manjaro, etc. To run: `chmod +x Audenic_2.0.0_amd64.AppImage && ./Audenic_2.0.0_amd64.AppImage`)*
+- **Debian / Ubuntu Package**: `bundle/deb/audenic_2.0.0_amd64.deb`  
+  *(Installs system-wide: `sudo dpkg -i audenic_2.0.0_amd64.deb`)*
+
+### Automated Multi-Platform Cloud Builds (GitHub Actions)
+
+Audenic features an automated CI/CD pipeline configured at `.github/workflows/build.yml`. Every time code is pushed to `main` or a release tag `v*` is created:
+1. GitHub runners spin up clean **Ubuntu 22.04** and **Windows** build environments.
+2. Web assets are bundled and the native Rust shell compiles with maximum optimization.
+3. Linux `.AppImage`, `.deb`, and Windows `.exe`, `.msi` are generated and uploaded directly to the GitHub Release and Actions artifacts.
 
 ### Web Production Bundle
 

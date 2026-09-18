@@ -64,6 +64,11 @@
     "fileAssociations": [
       { "ext": ["mp3", "flac", "wav", "ogg", "m4a", "aac", "wma", "opus"], "mimeType": "audio/*", "description": "Audio File" },
       { "ext": ["mp4", "webm", "mkv", "avi", "mov"], "mimeType": "video/*", "description": "Video File" }
-    ]
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": true
+      }
+    }
   }
 }
