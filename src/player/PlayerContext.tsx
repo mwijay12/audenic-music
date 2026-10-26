@@ -3,7 +3,7 @@ import React, {
 } from "react";
 import { ONLINE_TRACKS, type Track, type Playlist } from "../data/tracks";
 import { engine } from "./audioEngine";
-import { scanNativeMedia, nativeDelete, isNative, loadQueueNative, nativePlayback, setNativeEqualizer, nativeUpdatePosition } from "./nativeBridge";
+import { scanNativeMedia, nativeDelete, isNative, loadQueueNative, nativePlayback, setNativeEqualizer, setNativeReverb, nativeUpdatePosition } from "./nativeBridge";
 import { isDesktop, pickFolder, scanDirectory, toAssetUrl } from "./tauriBridge";
 import { readTags, attachLrc, findLrcFor, type EmbeddedTags } from "./tagReader";
 import { useMediaSession } from "./useMediaSession";
@@ -607,6 +607,19 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => { engine.setEQ(equalizer); if (isNative()) setNativeEqualizer(equalizer, bassBoost); }, [equalizer]);
   useEffect(() => { engine.setBassBoost(bassBoost); if (isNative()) setNativeEqualizer(equalizer, bassBoost); }, [bassBoost]);
   useEffect(() => { engine.setReverb(reverb); }, [reverb]);
+
+  // Re-apply native effects whenever the playing track/session changes. Android
+  // audio effects live on the player's audio session: when ExoPlayer opens a new
+  // session the previously-created Equalizer/BassBoost/Reverb objects no longer
+  // affect the output, so the sliders would silently stop having any effect.
+  useEffect(() => {
+    if (!isNative()) return;
+    const push = () => { setNativeEqualizer(equalizer, bassBoost); setNativeReverb(reverb).catch(() => {}); };
+    push();
+    const t1 = window.setTimeout(push, 600);
+    const t2 = window.setTimeout(push, 1800);
+    return () => { window.clearTimeout(t1); window.clearTimeout(t2); };
+  }, [currentId, isPlaying, equalizer, bassBoost, reverb]);
   useEffect(() => { engine.setLoudnessNormalization(replayGain); }, [replayGain]);
   useEffect(() => {
     engine.setVolume(volume);

@@ -475,9 +475,30 @@ public class AudenicPlaybackService extends Service {
                         equalizer = new Equalizer(0, audioSessionId);
                         equalizer.setEnabled(true);
                     }
+                    // bandLevels arrive as MILLIBELS (-1500..1500) from JS.
+                    // Map our 5 UI bands (60/250/1k/4k/12k Hz) onto whatever
+                    // bands this device actually exposes, instead of assuming
+                    // index-for-index equality.
                     short numBands = equalizer.getNumberOfBands();
-                    for (int i = 0; i < Math.min(bandLevels.length, numBands); i++) {
-                        equalizer.setBandLevel((short) i, (short) bandLevels[i]);
+                    short[] range = equalizer.getBandLevelRange();
+                    int[] uiFreqHz = { 60, 250, 1000, 4000, 12000 };
+                    for (int i = 0; i < bandLevels.length; i++) {
+                        int targetHz = uiFreqHz[Math.min(i, uiFreqHz.length - 1)];
+                        short bestBand = 0;
+                        int bestDiff = Integer.MAX_VALUE;
+                        for (short b = 0; b < numBands; b++) {
+                            int centerHz = Math.max(0, equalizer.getCenterFreq(b) / 1000);
+                            int diff = Math.abs(centerHz - targetHz);
+                            if (diff < bestDiff) {
+                                bestDiff = diff;
+                                bestBand = b;
+                            }
+                        }
+                        int level = bandLevels[i];
+                        if (range != null && range.length == 2) {
+                            level = Math.max(range[0], Math.min(range[1], level));
+                        }
+                        equalizer.setBandLevel(bestBand, (short) level);
                     }
                 }
                 if (bassBoost > 0) {
@@ -489,7 +510,10 @@ public class AudenicPlaybackService extends Service {
                         bassBoostFx = new BassBoost(0, audioSessionId);
                         bassBoostFx.setEnabled(true);
                     }
-                    bassBoostFx.setStrength((short) bassBoost);
+                    // 0..1000 strength (JS already scaled from its 0..100 %)
+                    bassBoostFx.setStrength((short) Math.max(0, Math.min(1000, bassBoost)));
+                } else if (bassBoostFx != null) {
+                    bassBoostFx.setEnabled(false);
                 }
                 activeAudioSessionId = audioSessionId;
             } catch (Exception e) {

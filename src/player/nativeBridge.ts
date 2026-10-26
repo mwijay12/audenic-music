@@ -192,13 +192,28 @@ export async function loadQueueNative(
   return false;
 }
 
-/** Set native ExoPlayer Equalizer bands & Bass Boost strength. */
+/**
+ * Set native ExoPlayer Equalizer bands & Bass Boost strength.
+ *
+ * Unit conversion happens HERE because the two APIs disagree:
+ *  - the UI/WebAudio EQ works in dB (-12..+12), Android's
+ *    Equalizer.setBandLevel() wants MILLIBELS (-1500..+1500),
+ *  - the UI bass slider is 0..100 %, Android's BassBoost.setStrength()
+ *    wants 0..1000.
+ * Passing raw dB/% meant a "+12 dB" band arrived as 0.12 dB and bass at 10 %
+ * strength — technically applied, but audibly doing nothing.
+ */
 export async function setNativeEqualizer(bands: number[], bassBoost = 0) {
   if (!isNative()) return false;
   try {
     const plugin = (window as CapWindow).Capacitor?.Plugins?.AudenicMedia;
     if (!plugin?.setEqualizer) return false;
-    await plugin.setEqualizer({ bands, bassBoost });
+    const bandMb = (bands || []).map((db) => {
+      const v = Number(db) || 0;
+      return Math.round(Math.max(-1500, Math.min(1500, v * 100)));
+    });
+    const strength = Math.round(Math.max(0, Math.min(1000, (Number(bassBoost) || 0) * 10)));
+    await plugin.setEqualizer({ bands: bandMb, bassBoost: strength });
     return true;
   } catch { return false; }
 }
