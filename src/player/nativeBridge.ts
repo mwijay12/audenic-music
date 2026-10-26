@@ -52,6 +52,35 @@ function sanitizeUri(uri: string): string {
     .replace(/\?/g, "%3F");
 }
 
+/**
+ * Safety net: wrap Capacitor's convertFileSrc once, at module load.
+ *
+ * convertFileSrc() internally calls encodeURI(), which throws URIError
+ * "URI malformed" on any path containing a bare "%" — and it can be called from
+ * third-party code we don't control as well as ours. Because the throw happens
+ * during render it used to crash the whole player screen. This wrapper
+ * sanitizes and retries instead of throwing, and never propagates an error.
+ */
+if (typeof window !== "undefined") {
+  const cap = (window as CapWindow).Capacitor;
+  if (cap && typeof cap.convertFileSrc === "function" && !(cap as any).__audenicGuarded) {
+    const original = cap.convertFileSrc.bind(cap);
+    (cap as any).__audenicGuarded = true;
+    cap.convertFileSrc = (uri: string) => {
+      const raw = String(uri ?? "");
+      try {
+        return original(raw);
+      } catch {
+        try {
+          return original(sanitizeUri(raw));
+        } catch {
+          return raw;
+        }
+      }
+    };
+  }
+}
+
 export async function scanNativeMedia(kind: "audio" | "video" = "audio"): Promise<NativeMediaItem[]> {
   if (!isNative()) return [];
   try {
@@ -81,6 +110,7 @@ export async function scanNativeMedia(kind: "audio" | "video" = "audio"): Promis
               dateAdded: t.dateAdded || Date.now(),
               artwork: convertedArt || rawArt,
               albumArtFilePath: t.albumArtFilePath || "",
+              path: t.path || t.contentUri || rawUri,
             };
           });
         }

@@ -23,6 +23,8 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [folderFilter, setFolderFilter] = useState<string | null>(null);
+  const [showFolders, setShowFolders] = useState(false);
 
   const {
     tracks,
@@ -97,11 +99,35 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
     setR2Uploading(false);
   };
 
+  // Folder of a local track, derived from its raw path (content:// / file:// /
+  // /storage/...). Lets you pick ONE folder instead of everything on the device.
+  const folderOf = useCallback((t: any): string => {
+    const p = String(t?.path || t?.rawContentUri || "");
+    const clean = p.replace(/^file:\/\//, "");
+    if (!clean.startsWith("/")) return "";
+    const i = clean.lastIndexOf("/");
+    return i > 0 ? clean.slice(0, i) : "";
+  }, []);
+
+  const folders = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const t of localTracks) {
+      const f = folderOf(t);
+      if (!f) continue;
+      map.set(f, (map.get(f) || 0) + 1);
+    }
+    return [...map.entries()].sort((a, b) => b[1] - a[1]);
+  }, [localTracks, folderOf]);
+
   const list = useMemo(() => {
     let base = tracks;
     if (chip === "Liked Songs") base = tracks.filter(t => liked.includes(t.id));
     else if (chip === "Local Files") base = localTracks;
     else if (chip === "Playlists") return [];
+
+    if (folderFilter) {
+      base = base.filter(t => folderOf(t) === folderFilter);
+    }
 
     if (q.trim()) {
       const query = q.toLowerCase().trim();
@@ -119,7 +145,7 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
     }
 
     return base;
-  }, [chip, tracks, localTracks, liked, q, sortBy, addedAt, playCounts]);
+  }, [chip, tracks, localTracks, liked, q, sortBy, addedAt, playCounts, folderFilter, folderOf]);
 
   const showPlaylists = chip === "Playlists";
 
@@ -253,8 +279,53 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
       </div>
 
       <div className="no-scrollbar flex gap-2 overflow-x-auto px-6 py-2">
-        {LIBRARY_CHIPS.map(c => <Chip key={c} label={c} active={chip === c} onClick={() => setChip(c)} />)}
+        {LIBRARY_CHIPS.map(c => <Chip key={c} label={c} active={chip === c} onClick={() => { setChip(c); setShowFolders(false); }} />)}
+        <button
+          onClick={() => setShowFolders(v => !v)}
+          className={`press shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold transition ${showFolders || folderFilter ? "bg-[var(--accent)] text-black" : "bg-white/[0.07] text-white/60"}`}
+        >
+          📁 Folders{folders.length ? ` (${folders.length})` : ""}
+        </button>
       </div>
+
+      {folderFilter && (
+        <div className="flex items-center gap-2 px-6 pb-1">
+          <span className="truncate rounded-full bg-[var(--accent)]/15 px-2.5 py-1 text-[10.5px] font-semibold text-[var(--accent)]">
+            {folderFilter.split("/").slice(-2).join("/")}
+          </span>
+          <button onClick={() => setFolderFilter(null)} className="text-[11px] font-bold text-white/50">✕ clear</button>
+        </div>
+      )}
+
+      {showFolders && (
+        <div className="mx-6 mb-1 max-h-56 overflow-y-auto rounded-2xl border border-white/10 bg-[#141418]">
+          {folders.length === 0 ? (
+            <p className="p-3 text-center text-[11.5px] text-white/40">No folders yet — run a Scan first.</p>
+          ) : (
+            <>
+              <button
+                onClick={() => { setFolderFilter(null); setShowFolders(false); }}
+                className="flex w-full items-center justify-between px-3 py-2 text-left text-[12px] text-white/70 hover:bg-white/5"
+              >
+                <span>All folders</span><span className="text-[10px] text-white/35">{localTracks.length}</span>
+              </button>
+              {folders.map(([f, n]) => (
+                <button
+                  key={f}
+                  onClick={() => { setFolderFilter(f); setShowFolders(false); }}
+                  className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-white/5"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[12px] font-medium text-white">{f.split("/").pop() || f}</span>
+                    <span className="block truncate text-[9.5px] text-white/35">{f}</span>
+                  </span>
+                  <span className="shrink-0 text-[10px] text-white/40">{n}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
 
       {/* Search Input Bar + Sort/Filter */}
       <div className="px-6 py-1.5">

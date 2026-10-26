@@ -717,8 +717,26 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   /* ── queue + lyrics + local tracks + videos persistence ── */
   useEffect(() => sv(SK.queue, queueIds), [queueIds]);
   useEffect(() => sv(SK.lyrics, customLyrics), [customLyrics]);
-  useEffect(() => sv(SK.local, localTracks.filter((t) => !t.src.startsWith("blob:"))), [localTracks]);
-  useEffect(() => sv("au.localVideos", localVideos.filter((v) => !v.src.startsWith("blob:"))), [localVideos]);
+  // Persist the scanned library. Two failure modes used to lose the whole
+  // library: (a) a track without `src` made .startsWith() throw inside the
+  // effect, (b) localStorage quota (covers + lyrics are bulky) — sv() swallowed
+  // the error, so nothing was saved and the next launch looked "wiped".
+  useEffect(() => {
+    const playable = localTracks.filter((t) => !(t.src || "").startsWith("blob:"));
+    const slim = playable.map((t) => ({
+      ...t,
+      lyrics: undefined,
+      cover: (t.cover || "").startsWith("data:") ? "" : t.cover,
+    }));
+    const write = (list: Track[]) => {
+      try { localStorage.setItem(SK.local, JSON.stringify(list)); return true; } catch { return false; }
+    };
+    if (!write(playable)) write(slim);
+  }, [localTracks]);
+  useEffect(() => {
+    const playable = localVideos.filter((v) => !(v.src || "").startsWith("blob:"));
+    try { localStorage.setItem("au.localVideos", JSON.stringify(playable)); } catch { /* quota */ }
+  }, [localVideos]);
 
   // Keep the queue in sync with the library — remove stale ids, seed when empty.
   useEffect(() => {
@@ -828,6 +846,30 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     });
   }, [unlock]);
 
+  /**
+   * Artwork URL that NATIVE code (notification / lockscreen / MediaSession) can
+   * actually read. Native has no access to the WebView's
+   * http://localhost/_capacitor_… URLs, so those must never be sent — it has to
+   * be a file:// path, a content:// URI, or a real http(s) URL. Without this the
+   * notification falls back to the generated letter tile (no album art).
+   */
+  const nativeCoverFor = (t: Track): string => {
+    const anyT = t as any;
+    const filePath: string = anyT.albumArtFilePath || "";
+    if (filePath) return filePath.startsWith("file://") ? filePath : `file://${filePath}`;
+    const raw: string = anyT.rawAlbumArt || "";
+    if (raw && !raw.includes("_capacitor_")) {
+      if (raw.startsWith("content://") || raw.startsWith("file://")) return raw;
+      if (raw.startsWith("/")) return `file://${raw}`;
+      if (raw.startsWith("http://") || raw.startsWith("https://")) return raw;
+    }
+    const cover: string = t.cover || "";
+    if (cover && !cover.includes("_capacitor_") && /^https?:\/\//.test(cover) && !cover.includes("localhost")) {
+      return cover;
+    }
+    return "";
+  };
+
   const loadAndPlay = useCallback((track: Track, autoplay = true, restart = false, startTime?: number) => {
     const a = audioRef.current; if (!a) return;
     try {
@@ -886,7 +928,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
           uri: (x as any).rawContentUri || (x as any).path || safeSrc,
           title: x.title,
           artist: x.artist,
-          coverUrl: (x as any).rawAlbumArt || x.cover,
+          coverUrl: nativeCoverFor(x),
           duration: x.duration ? (x.duration > 10000 ? x.duration : Math.floor(x.duration * 1000)) : 0,
         })),
         trackIdx >= 0 ? trackIdx : 0,
@@ -1243,9 +1285,10 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
               lyrics: (x as any).lrc
                 ? ((x as any).lrc as string).split('\n').filter((s: string) => s.trim().length > 0)
                 : [x.title || "Unknown title", x.artist || "Unknown Artist", x.album || "On device"],
-              // Preserve raw native paths for notification artwork
+              // Preserve raw native paths for notification artwork + folder grouping
               rawAlbumArt: rawArt,
               albumArtFilePath: (x as any).albumArtFilePath || "",
+              path: (x as any).path || x.uri || "",
             };
           });
           if (added.length && start === 0) unlock("first_scan");

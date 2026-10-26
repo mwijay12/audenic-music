@@ -32,11 +32,9 @@ export class ErrorBoundary extends Component<Props, State> {
     const msg = String(error?.message || "");
     if (/URI malformed|malformed URI/i.test(msg) && !this.autoRecovered) {
       this.autoRecovered = true;
-      try {
-        localStorage.removeItem("au.localTracks");
-        localStorage.removeItem("au.localVideos");
-      } catch { /* ignore */ }
-      // Defer so React finishes unwinding this render pass first.
+      // Retry the render WITHOUT touching storage. Clearing au.localTracks here
+      // used to wipe the user's entire scanned library, which is why songs
+      // "disappeared" and had to be re-scanned.
       window.setTimeout(() => this.setState({ hasError: false, error: null }), 0);
     }
   }
