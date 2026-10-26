@@ -8,7 +8,7 @@ import { ArtworkViz, BarsViz, WaveViz, VIZ_STYLES, ART_SHAPES } from "../compone
 import { LANGUAGES, translateLines } from "../player/gemini";
 import { Back, Equalizer as EqIcon, Heart, Next, Pause, Play, Prev, Queue, Repeat as RepeatIcon, Share, Shuffle, Sparkle, Target, Timer as TimerIcon, Trash, ChevronUp, ChevronDown, Check } from "../components/Icons";
 import { nativeVibrate, nativeShare, shareImage } from "../player/nativeBridge";
-import { fetchLyricsViaGemini, transcribeViaGemini } from "../player/lyricsService";
+import { fetchLyricsViaGemini } from "../player/lyricsService";
 import { useLrcLyrics } from "../player/useLrcLyrics";
 import SyncedLyrics from "../components/SyncedLyrics";
 import { MarqueeText } from "../components/Marquee";
@@ -37,7 +37,7 @@ export default function NowPlaying({ onBack, onOpenSettings, onOpenArtist: _onOp
   const [translateErr, setTranslateErr] = useState<string | null>(null);
   const [burst, setBurst] = useState<{ x: number; heart: boolean } | null>(null);
   const [hint, setHint] = useState<string | null>(null);
-  const [lyricTab, setLyricTab] = useState<"read" | "translate" | "edit" | "sing" | "settings">("read");
+  const [lyricTab, setLyricTab] = useState<"read" | "translate" | "sing" | "edit" | "settings">("read");
   const [lyricDraft, setLyricDraft] = useState("");
   const [locateFlash, setLocateFlash] = useState(false);
   const [shareTpl, setShareTpl] = useState<ShareTemplate>("pulse");
@@ -61,12 +61,16 @@ export default function NowPlaying({ onBack, onOpenSettings, onOpenArtist: _onOp
   const [aiLyricsHidden, setAiLyricsHidden] = useState(false);
   const [aiLyricsReported, setAiLyricsReported] = useState(false);
 
+  // Live speech-to-text state
   const [singingActive, setSingingActive] = useState(false);
   const [liveTranscript, setLiveTranscript] = useState<string[]>([]);
-  const [transcribing, setTranscribing] = useState(false);
-  const [performanceUrl, setPerformanceUrl] = useState<string | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
+  const [sttInterim, setSttInterim] = useState("");
+  const [sttError, setSttError] = useState<string | null>(null);
+  const [sttLang, setSttLang] = useState<string>(() => localStorage.getItem("audenic_stt_lang") || "en-US");
+  const recognitionRef = useRef<any>(null);
+  const sttKeepAlive = useRef(false);
+
+  useEffect(() => { localStorage.setItem("audenic_stt_lang", sttLang); }, [sttLang]);
 
   const lrc = useLrcLyrics({
     audioPath: (current as any)?.path || null,
@@ -103,53 +107,104 @@ export default function NowPlaying({ onBack, onOpenSettings, onOpenArtist: _onOp
     return () => { abort = true; };
   }, [current?.id, lyrics.length, geminiKey]);
 
+  // ── Live speech-to-text ───────────────────────────────────────────────
+  // Speak (or sing) and the words are typed out live. This uses the device's
+  // own SpeechRecognition engine, which streams INTERIM results continuously —
+  // unlike the old chunked MediaRecorder → Gemini upload, which only returned a
+  // line every 4 seconds and felt like nothing was happening.
+  const sttSupported = typeof window !== "undefined" &&
+    !!((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition);
+
   const startSingAlong = async () => {
+    if (!sttSupported) {
+      flash("Speech-to-text not available on this device");
+      return;
+    }
+    if (singingActive) return;
     try {
+      // Ask for mic permission up-front so the engine doesn't silently fail.
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      audioChunksRef.current = [];
-      setLiveTranscript([]);
-      setPerformanceUrl(null);
-      setSingingActive(true);
-
-      const mimeType = typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm" : "audio/aac";
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          audioChunksRef.current.push(e.data);
-          setTranscribing(true);
-          const reader = new FileReader();
-          reader.readAsDataURL(e.data);
-          reader.onloadend = async () => {
-            const base64 = reader.result as string;
-            const text = await transcribeViaGemini(base64, mimeType, geminiKey);
-            setTranscribing(false);
-            if (text) setLiveTranscript((prev) => [...prev, text]);
-          };
-        }
-      };
-
-      recorder.onstop = () => {
-        const fullBlob = new Blob(audioChunksRef.current, { type: mimeType });
-        setPerformanceUrl(URL.createObjectURL(fullBlob));
-        stream.getTracks().forEach((t) => t.stop());
-      };
-
-      recorder.start(4000);
-      flash("Sing-Along active");
+      stream.getTracks().forEach((t) => t.stop());
     } catch {
       flash("Microphone access denied");
+      return;
     }
+
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.maxAlternatives = 1;
+    rec.lang = sttLang;
+
+    rec.onresult = (e: any) => {
+      let interim = "";
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const r = e.results[i];
+        const text = (r[0]?.transcript || "").trim();
+        if (r.isFinal) {
+          if (text) setLiveTranscript((prev) => [...prev.slice(-300), text]);
+        } else {
+          interim += text + " ";
+        }
+      }
+      setSttInterim(interim.trim());
+    };
+
+    rec.onerror = (ev: any) => {
+      if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") {
+        setSttError("Microphone permission denied");
+        sttKeepAlive.current = false;
+        setSingingActive(false);
+      } else if (ev?.error === "no-speech") {
+        /* harmless — engine restarts below */
+      } else if (ev?.error) {
+        setSttError(`Speech engine: ${ev.error}`);
+      }
+    };
+
+    // Android/WebView stops the engine after a pause; restart while the user
+    // still has capture switched on so it behaves like continuous dictation.
+    rec.onend = () => {
+      if (sttKeepAlive.current) {
+        try { rec.start(); } catch { /* already started */ }
+      } else {
+        setSingingActive(false);
+      }
+    };
+
+    recognitionRef.current = rec;
+    sttKeepAlive.current = true;
+    setSttError(null);
+    setSttInterim("");
+    setSingingActive(true);
+    try { rec.start(); } catch { /* already started */ }
+    flash("Listening — speak or sing");
   };
 
   const stopSingAlong = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
+    sttKeepAlive.current = false;
+    try { recognitionRef.current?.stop(); } catch { /* */ }
+    recognitionRef.current = null;
+    setSttInterim("");
     setSingingActive(false);
-    flash("Sing-Along stopped");
+    flash("Stopped");
   };
+
+  // Stop the mic when leaving the screen / closing the sheet.
+  useEffect(() => {
+    if (sheet !== "lyrics") {
+      sttKeepAlive.current = false;
+      try { recognitionRef.current?.stop(); } catch { /* */ }
+      recognitionRef.current = null;
+      setSingingActive(false);
+    }
+  }, [sheet]);
+
+  useEffect(() => () => {
+    sttKeepAlive.current = false;
+    try { recognitionRef.current?.stop(); } catch { /* */ }
+  }, []);
 
   useEffect(() => {
     if (!translateOn || !current) return;
@@ -406,7 +461,7 @@ export default function NowPlaying({ onBack, onOpenSettings, onOpenArtist: _onOp
                   onClick={() => setLyricTab(tab)}
                   className={`press rounded-full px-2.5 py-1 text-[10px] font-bold capitalize transition ${lyricTab === tab ? "bg-[var(--accent)] text-black" : "text-white/55"}`}
                 >
-                  {tab === "translate" ? "Translate" : tab === "sing" ? "Sing" : tab === "settings" ? "Style" : tab}
+                  {tab === "translate" ? "Translate" : tab === "sing" ? "Dictate" : tab === "settings" ? "Style" : tab}
                 </button>
               ))}
             </div>
@@ -506,49 +561,85 @@ export default function NowPlaying({ onBack, onOpenSettings, onOpenArtist: _onOp
 
           {lyricTab === "sing" && (
             <div className="flex min-h-0 flex-1 flex-col">
-              <div className="mb-3 flex items-center justify-between rounded-2xl bg-white/[0.04] p-3">
-                <div>
-                  <p className="text-[13px] font-bold text-white">Sing-Along Live Transcription</p>
-                  <p className="text-[10.5px] text-white/40">Sing with the track — mic audio is transcribed live</p>
+              <div className="mb-2 flex items-center justify-between rounded-2xl bg-white/[0.04] p-3">
+                <div className="min-w-0 flex-1 pr-2">
+                  <p className="text-[13px] font-bold text-white">Live Dictation</p>
+                  <p className="text-[10.5px] leading-snug text-white/40">Speak or sing — words appear as you talk</p>
                 </div>
                 {singingActive ? (
-                  <button onClick={stopSingAlong} className="press flex items-center gap-1.5 rounded-full bg-rose-500 px-3 py-1.5 text-[11px] font-bold text-white">
+                  <button onClick={stopSingAlong} className="press flex shrink-0 items-center gap-1.5 rounded-full bg-rose-500 px-3 py-1.5 text-[11px] font-bold text-white">
                     <span className="h-2 w-2 animate-ping rounded-full bg-white" /> Stop
                   </button>
                 ) : (
-                  <button onClick={startSingAlong} className="press flex items-center gap-1.5 rounded-full bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-black">
-                    Start Recording
+                  <button onClick={startSingAlong} className="press shrink-0 rounded-full bg-[var(--accent)] px-3 py-1.5 text-[11px] font-bold text-black">
+                    Start
                   </button>
                 )}
               </div>
 
-              {transcribing && (
-                <p className="pb-2 text-center text-[10.5px] text-[var(--accent)] pulse-soft">Transcribing your voice via Gemini…</p>
+              {/* language for the speech engine */}
+              <div className="mb-2 flex gap-1.5">
+                {[
+                  { code: "en-US", label: "English" },
+                  { code: "sw-KE", label: "Kiswahili" },
+                ].map((l) => (
+                  <button
+                    key={l.code}
+                    onClick={() => setSttLang(l.code)}
+                    disabled={singingActive}
+                    className={`press rounded-full px-2.5 py-1 text-[10px] font-semibold transition disabled:opacity-40 ${sttLang === l.code ? "bg-[var(--accent)] text-black" : "bg-white/[0.07] text-white/55"}`}
+                  >
+                    {l.label}
+                  </button>
+                ))}
+              </div>
+
+              {!sttSupported && (
+                <div className="mb-2 rounded-2xl border border-amber-400/20 bg-amber-400/[0.08] p-3">
+                  <p className="text-[11px] text-amber-200">
+                    This device's WebView has no speech-to-text engine. On Android, Chrome/Google app provides it — install/enable "Google" app or use the app on a device with Google speech services.
+                  </p>
+                </div>
               )}
 
-              <div className="no-scrollbar smooth-scroll min-h-0 flex-1 space-y-2 overflow-y-auto rounded-2xl border border-white/8 bg-black/30 p-4 text-center">
-                {liveTranscript.length > 0 ? (
-                  liveTranscript.map((t, idx) => (
-                    <p key={idx} className="text-[14px] font-bold text-[var(--accent)] animate-fade-in">
-                      {t}
-                    </p>
-                  ))
+              {sttError && (
+                <p className="pb-2 text-center text-[10.5px] text-rose-300">{sttError}</p>
+              )}
+
+              <div className="no-scrollbar smooth-scroll min-h-0 flex-1 space-y-1.5 overflow-y-auto rounded-2xl border border-white/8 bg-black/30 p-4 text-left">
+                {liveTranscript.length > 0 || sttInterim ? (
+                  <>
+                    {liveTranscript.map((t, idx) => (
+                      <p key={idx} className="text-[13.5px] leading-snug text-white">{t}</p>
+                    ))}
+                    {sttInterim && (
+                      <p className="text-[13.5px] leading-snug text-white/40 italic">{sttInterim}…</p>
+                    )}
+                  </>
                 ) : (
-                  <p className="py-8 text-[11.5px] text-white/30">
-                    {singingActive ? "Listening… Sing into your mic!" : "Tap Start to capture your singing live."}
+                  <p className="py-8 text-center text-[11.5px] text-white/30">
+                    {singingActive ? "Listening… start speaking." : "Tap Start, then speak or sing."}
                   </p>
                 )}
               </div>
 
-              {performanceUrl && (
-                <div className="mt-3 flex justify-center">
-                  <a
-                    href={performanceUrl}
-                    download={`singalong-${current.title}.webm`}
-                    className="press flex items-center gap-2 rounded-full bg-emerald-400 px-4 py-2 text-[11.5px] font-bold text-black"
+              {liveTranscript.length > 0 && (
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => {
+                      setTrackLyrics(current.id, liveTranscript);
+                      flash("Saved as this track's lyrics");
+                    }}
+                    className="press flex-1 rounded-full bg-[var(--accent)] px-3 py-2 text-[11.5px] font-bold text-black"
                   >
-                    Save Performance
-                  </a>
+                    Save as lyrics
+                  </button>
+                  <button
+                    onClick={() => { setLiveTranscript([]); setSttInterim(""); }}
+                    className="press rounded-full bg-white/10 px-3 py-2 text-[11.5px] font-semibold text-white/70"
+                  >
+                    Clear
+                  </button>
                 </div>
               )}
             </div>

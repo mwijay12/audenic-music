@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { usePlayer, fmt } from "../player/PlayerContext";
-import { useClock } from "../components/Shell";
+import { useClock, StatusBar } from "../components/Shell";
+import { isNative } from "../player/nativeBridge";
 import {
   Next,
   Pause,
@@ -40,9 +41,19 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
 
   const clock = useClock();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const native = isNative();
 
-  // Keyboard shortcut listener for Driver / Simple mode
+  // Desktop-only chrome (keyboard hints, fullscreen toggle) must only appear on
+  // a real pointer/keyboard device — otherwise "Space / N / P" hints make the
+  // phone UI look like a PC app.
+  const hasKeyboard = !native && typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  // Keyboard shortcuts only make sense with a physical keyboard (desktop/web).
+  // Skip entirely on native Android/iOS so this logic never runs on mobile.
   useEffect(() => {
+    if (!hasKeyboard) return;
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === "Space") {
@@ -61,7 +72,7 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [toggle, next, prev, onExit]);
+  }, [hasKeyboard, toggle, next, prev, onExit]);
 
   const toggleFullscreen = () => {
     if (!document.fullscreenElement) {
@@ -91,6 +102,10 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
         />
       )}
 
+      {/* Obey the real OS status bar on native devices — reserves the safe-area
+          inset so our content never overlaps the system clock/icons. */}
+      <StatusBar />
+
       {/* Top Cockpit Header */}
       <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
         {/* Digital Clock */}
@@ -111,22 +126,24 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
         {/* Status Mode Badge */}
         <div className="hidden sm:flex items-center gap-2 rounded-full border border-[var(--accent)]/30 bg-[var(--accent)]/10 px-4 py-1.5 text-xs font-bold uppercase tracking-wider text-[var(--accent)]">
           <span className="h-2 w-2 rounded-full bg-[var(--accent)] animate-pulse" />
-          <span>Desktop Simple Mode • Driving Cockpit</span>
+          <span>Simple Mode • Driving Cockpit</span>
         </div>
 
         {/* Window Actions */}
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggleFullscreen}
-            className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/70 hover:bg-white/15 hover:text-white transition"
-            title="Fullscreen Toggle (F)"
-          >
-            {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
-          </button>
+          {hasKeyboard && (
+            <button
+              onClick={toggleFullscreen}
+              className="grid h-11 w-11 place-items-center rounded-2xl border border-white/10 bg-white/[0.06] text-white/70 hover:bg-white/15 hover:text-white transition"
+              title="Fullscreen Toggle"
+            >
+              {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
+            </button>
+          )}
           <button
             onClick={onExit}
             className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/[0.08] px-5 py-2.5 text-sm font-bold text-white hover:bg-rose-500/20 hover:border-rose-500/30 hover:text-rose-300 active:scale-95 transition"
-            title="Exit Simple Mode (Esc)"
+            title="Exit Simple Mode"
           >
             <X size={16} />
             <span>Exit</span>
@@ -177,8 +194,8 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
             </div>
           ) : (
             <div>
-              <h1 className="text-3xl font-bold text-white/40">No Track Selected</h1>
-              <p className="text-sm text-white/25 pt-1">Music from your library will appear here</p>
+              <h1 className="text-3xl font-bold text-white/40">Nothing queued</h1>
+              <p className="text-sm text-white/25 pt-1">Pick a song from My Music to start</p>
             </div>
           )}
 
@@ -236,7 +253,7 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
               <button
                 onClick={prev}
                 className="grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-3xl border border-white/10 bg-white/[0.07] text-white hover:bg-white/15 active:scale-90 transition shadow-lg"
-                title="Previous (P)"
+                title="Previous"
               >
                 <Prev size={28} />
               </button>
@@ -244,7 +261,7 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
               <button
                 onClick={toggle}
                 className="grid h-20 w-20 sm:h-24 sm:w-24 place-items-center rounded-3xl bg-[var(--accent)] text-black shadow-[0_15px_45px_color-mix(in_srgb,var(--accent)_65%,transparent)] hover:scale-105 active:scale-90 transition"
-                title={isPlaying ? "Pause (Space)" : "Play (Space)"}
+                title={isPlaying ? "Pause" : "Play"}
               >
                 {isPlaying ? <Pause size={36} /> : <Play size={36} />}
               </button>
@@ -252,7 +269,7 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
               <button
                 onClick={next}
                 className="grid h-16 w-16 sm:h-20 sm:w-20 place-items-center rounded-3xl border border-white/10 bg-white/[0.07] text-white hover:bg-white/15 active:scale-90 transition shadow-lg"
-                title="Next (N)"
+                title="Next"
               >
                 <Next size={28} />
               </button>
@@ -294,16 +311,18 @@ export default function DriveMode({ onExit }: { onExit: () => void }) {
         </div>
       </div>
 
-      {/* Bottom Keyboard Hotkeys Guide */}
+      {/* Footer */}
       <div className="flex items-center justify-between border-t border-white/[0.08] pt-4 text-xs text-white/40 font-mono">
-        <div className="flex items-center gap-4">
-          <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">Space</kbd> Play/Pause</span>
-          <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">N</kbd> Next</span>
-          <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">P</kbd> Prev</span>
-          <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">Esc</kbd> Exit</span>
-        </div>
+        {hasKeyboard && (
+          <div className="flex items-center gap-4">
+            <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">Space</kbd> Play/Pause</span>
+            <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">N</kbd> Next</span>
+            <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">P</kbd> Prev</span>
+            <span><kbd className="rounded bg-white/10 px-1.5 py-0.5 text-white/70">Esc</kbd> Exit</span>
+          </div>
+        )}
         <div>
-          <span>Audenic Studio Drivers Engine</span>
+          <span>Audenic • Simple Mode</span>
         </div>
       </div>
     </div>

@@ -35,6 +35,7 @@ export function VirtualList<T>({
   className = "",
   bottomPad = 0,
   onEndReached,
+  onScrollChange,
   header,
   empty,
 }: VirtualListProps<T>) {

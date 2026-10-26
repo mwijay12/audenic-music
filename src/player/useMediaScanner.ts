@@ -116,6 +116,19 @@ export function getAvatarColor(key: string): string {
   return AVATAR_COLORS[index];
 }
 
+/**
+ * Pre-sanitize a raw native path/URI before handing it to Capacitor.
+ * Escapes stray "%" (not already part of a valid %XX sequence), "#" and "?"
+ * so WebView-side URI decoding never throws "URI malformed" — mirrors the
+ * same proactive sanitization already used in nativeBridge.ts/useVideoScanner.ts.
+ */
+function sanitizeNativePath(path: string): string {
+  return path
+    .replace(/%(?![0-9A-Fa-f]{2})/g, "%25")
+    .replace(/#/g, "%23")
+    .replace(/\?/g, "%3F");
+}
+
 export function safeConvertFileSrc(path: string): string {
   if (!path) return "";
   try {
@@ -127,19 +140,16 @@ export function safeConvertFileSrc(path: string): string {
     ) {
       return path;
     }
-    if (path.startsWith("content://")) {
+    // Always sanitize BEFORE the first convertFileSrc call — a stray "%"/"#"/"?"
+    // in a content:// or file path can make the WebView throw "URI malformed"
+    // asynchronously while loading, not just synchronously here, so we must not
+    // wait for a catch block to fix it.
+    const sanitized = sanitizeNativePath(path);
+    try {
+      return Capacitor.convertFileSrc(sanitized);
+    } catch {
       try {
         return Capacitor.convertFileSrc(path);
-      } catch {
-        return path;
-      }
-    }
-    try {
-      return Capacitor.convertFileSrc(path);
-    } catch {
-      const sanitized = path.replace(/%/g, "%25").replace(/#/g, "%23").replace(/\?/g, "%3F");
-      try {
-        return Capacitor.convertFileSrc(sanitized);
       } catch {
         return path;
       }

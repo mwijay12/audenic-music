@@ -441,8 +441,15 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
   const rawTracks = useMemo(() => [...localTracks, ...adminTracks, ...ONLINE_TRACKS], [adminTracks, localTracks]);
   const tracks = useMemo(() => rawTracks.filter((t) => !blacklistedIds.includes(t.id)), [rawTracks, blacklistedIds]);
   const current = useMemo(
-    () => tracks.find((t) => t.id === currentId) || (externalTrack?.id === currentId ? externalTrack : null),
-    [tracks, currentId, externalTrack]
+    () =>
+      // Look up in `rawTracks` first: a track that is currently playing must
+      // stay resolvable even if it was just blacklisted/deleted (which filters
+      // it out of `tracks`). Otherwise the player — and Simple/Drive mode —
+      // would show "No Track Selected" while audio is still playing.
+      rawTracks.find((t) => t.id === currentId) ||
+      tracks.find((t) => t.id === currentId) ||
+      (externalTrack?.id === currentId ? externalTrack : null),
+    [rawTracks, tracks, currentId, externalTrack]
   );
 
   if (!audioRef.current && typeof Audio !== "undefined") {

@@ -627,17 +627,22 @@ public class AudenicPlaybackService extends Service {
         // SILENCED when the app is non-compliant. Declaring USAGE_MEDIA + handing audio focus to
         // media3's AudioFocusManager is also what makes ducking/pause-on-call work and is the
         // prerequisite for the system treating us as a real media session owner.
+        // NOTE: androidx.media3.common.AudioAttributes.Builder takes the *platform*
+        // android.media.AudioAttributes int constants (USAGE_*/CONTENT_TYPE_*), not its own
+        // constants — media3's AudioAttributes class defines no USAGE_MEDIA/CONTENT_TYPE_MUSIC
+        // fields of its own.
         player.setAudioAttributes(
                 new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_MEDIA)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                        .setContentType(android.media.AudioAttributes.CONTENT_TYPE_MUSIC)
                         .build(),
                 /* handleAudioFocus = */ true);
 
         // Pause instead of streaming into a disconnected output when headphones/Bluetooth drop.
         player.setHandleAudioBecomingNoisy(true);
         // Keep CPU alive across screen-off while ExoPlayer is loading or playing.
-        player.setWakeMode(androidx.media3.exoplayer.C.WAKE_MODE_NETWORK);
+        // WAKE_MODE_NETWORK lives in androidx.media3.common.C, not androidx.media3.exoplayer.C.
+        player.setWakeMode(androidx.media3.common.C.WAKE_MODE_NETWORK);
 
         player.addListener(new Player.Listener() {
             @Override

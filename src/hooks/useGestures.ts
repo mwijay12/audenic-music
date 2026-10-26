@@ -26,10 +26,22 @@ export function useGestures({
   const tapTimer = useRef<number | null>(null);
   const longTimer = useRef<number | null>(null);
   const moved = useRef(false);
+  // Touch devices (Capacitor/Android WebView, mobile Chrome) fire a synthetic
+  // mousedown/mousemove/mouseup sequence right after the real touchstart/
+  // touchmove/touchend sequence, for legacy compatibility. Since this hook
+  // binds BOTH touch and mouse handlers on the same element, a single
+  // physical tap used to run end() twice — the 2nd (synthetic mouse) call
+  // landed inside the 1st (real touch) call's 280ms double-tap window, so it
+  // was misread as a double-tap (-> onDoubleTap/"like") while swallowing the
+  // real single-tap's onSingleTap ("play/pause"). We track the last touch
+  // timestamp and ignore any mouse events that follow within 700ms.
+  const lastTouchAt = useRef(0);
 
   if (!enabled) return {};
 
-  const begin = (x: number, y: number) => {
+  const begin = (x: number, y: number, fromTouch: boolean) => {
+    if (!fromTouch && Date.now() - lastTouchAt.current < 700) return;
+    if (fromTouch) lastTouchAt.current = Date.now();
     start.current = { x, y, t: Date.now() };
     moved.current = false;
     if (onLongPress) {
@@ -39,12 +51,15 @@ export function useGestures({
     }
   };
 
-  const move = (x: number, y: number) => {
+  const move = (x: number, y: number, fromTouch: boolean) => {
+    if (!fromTouch && Date.now() - lastTouchAt.current < 700) return;
     if (!start.current) return;
     if (Math.abs(x - start.current.x) > 10 || Math.abs(y - start.current.y) > 10) moved.current = true;
   };
 
-  const end = (x: number, y: number, width: number) => {
+  const end = (x: number, y: number, width: number, fromTouch: boolean) => {
+    if (!fromTouch && Date.now() - lastTouchAt.current < 700) return;
+    if (fromTouch) lastTouchAt.current = Date.now();
     if (longTimer.current) { window.clearTimeout(longTimer.current); longTimer.current = null; }
     const s = start.current;
     start.current = null;
@@ -77,18 +92,18 @@ export function useGestures({
   };
 
   return {
-    onTouchStart: (e: React.TouchEvent) => begin(e.touches[0].clientX, e.touches[0].clientY),
-    onTouchMove: (e: React.TouchEvent) => move(e.touches[0].clientX, e.touches[0].clientY),
+    onTouchStart: (e: React.TouchEvent) => begin(e.touches[0].clientX, e.touches[0].clientY, true),
+    onTouchMove: (e: React.TouchEvent) => move(e.touches[0].clientX, e.touches[0].clientY, true),
     onTouchEnd: (e: React.TouchEvent) => {
       const t = e.changedTouches[0];
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      end(t.clientX, t.clientY, r.width);
+      end(t.clientX, t.clientY, r.width, true);
     },
-    onMouseDown: (e: React.MouseEvent) => begin(e.clientX, e.clientY),
-    onMouseMove: (e: React.MouseEvent) => move(e.clientX, e.clientY),
+    onMouseDown: (e: React.MouseEvent) => begin(e.clientX, e.clientY, false),
+    onMouseMove: (e: React.MouseEvent) => move(e.clientX, e.clientY, false),
     onMouseUp: (e: React.MouseEvent) => {
       const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
-      end(e.clientX, e.clientY, r.width);
+      end(e.clientX, e.clientY, r.width, false);
     },
   };
 }

@@ -29,22 +29,6 @@ interface MediaScannerPlugin {
   clearArtCache(): Promise<{ cleared: boolean }>;
 }
 
-interface NativePlaybackPlugin {
-  setQueueAndPlay(opts: { tracks: unknown[]; startIndex: number }): Promise<void>;
-  play(): Promise<void>;
-  pause(): Promise<void>;
-  next(): Promise<void>;
-  previous(): Promise<void>;
-  seekTo(opts: { position: number }): Promise<void>;
-  getState(): Promise<{
-    isPlaying: boolean;
-    position: number;
-    duration: number;
-    currentIndex: number;
-    currentTrack: unknown;
-  }>;
-}
-
 interface RawTrack {
   id: string;
   title: string;
@@ -61,20 +45,6 @@ const MediaScanner = registerPlugin<MediaScannerPlugin>("MediaScanner", {
     async checkPermission() { return { sdkVersion: 0, needed: "web", granted: false }; },
     async triggerMediaScan() { return { triggered: false }; },
     async clearArtCache() { return { cleared: false }; },
-  } as any,
-});
-
-const AudenicPlayback = registerPlugin<NativePlaybackPlugin>("AudenicPlayback", {
-  web: {
-    async setQueueAndPlay() { /* noop */ },
-    async play() {},
-    async pause() {},
-    async next() {},
-    async previous() {},
-    async seekTo() {},
-    async getState() {
-      return { isPlaying: false, position: 0, duration: 0, currentIndex: 0, currentTrack: null };
-    },
   } as any,
 });
 
@@ -152,8 +122,6 @@ export default function DiagnosticsScreen() {
       "3. Permission Status",
       "4. MediaStore Has Files",
       "5. URI Conversion",
-      "6. AudenicPlayback Plugin",
-      "7. Service Binding",
     ];
     setResults(
       labels.map((name, i) => ({
@@ -194,11 +162,6 @@ export default function DiagnosticsScreen() {
       );
       // Once MediaScanner itself is missing, downstream tests can't run.
       for (const i of ["t3", "t4", "t5"]) patch(i, "fail", "Skipped — MediaScanner not available.");
-      patch("t6", "loading", "Calling AudenicPlayback.getState()...");
-      const t6 = await runSafely(() => AudenicPlayback.getState());
-      patch("t6", t6.ok ? "pass" : "fail", t6.ok ? "getState() responded." : `AudenicPlayback not reachable: ${String((t6 as any).e?.message ?? (t6 as any).e)}`,
-            !t6.ok ? "Add `registerPlugin(PlaybackPlugin.class)` to MainActivity.java before super.onCreate()." : undefined);
-      patch("t7", "warn", "Skipped — upstream plugin missing.");
       setRunning(false);
       return;
     }
@@ -257,40 +220,6 @@ export default function DiagnosticsScreen() {
       }
     } else {
       patch("t5", "warn", "Skipped (no tracks to convert).");
-    }
-
-    // ── TEST 6: AudenicPlayback Plugin Exists ───────────────────
-    patch("t6", "loading", "Calling AudenicPlayback.getState()...");
-    const t6 = await runSafely(() => AudenicPlayback.getState());
-    if (t6.ok) {
-      patch("t6", "pass", "AudenicPlayback plugin reachable.");
-    } else {
-      patch("t6", "fail",
-        `AudenicPlayback plugin did NOT respond: ${String((t6 as any).e?.message ?? (t6 as any).e)}`,
-        "Add `registerPlugin(PlaybackPlugin.class)` to MainActivity.java before super.onCreate(). Also confirm you ran `npx cap sync android` after editing."
-      );
-    }
-
-    // ── TEST 7: Service Binding ─────────────────────────────────
-    patch("t7", "loading", "Waiting for service binding (1.5s)…");
-    await sleep(1500);
-    const t7 = await runSafely(() => AudenicPlayback.getState());
-    if (t7.ok) {
-      const s = t7.v as any;
-      const allZero =
-        s.isPlaying === false && s.position === 0 && s.duration === 0 && s.currentTrack === null;
-      if (allZero) {
-        patch("t7", "warn",
-          "Service reachable but no media loaded yet — bind may still be warming up.",
-          "Start a track, then re-run. If problems persist, check `adb logcat -s AudenicPlayback`."
-        );
-      } else {
-        patch("t7", "pass",
-          `isPlaying=${s.isPlaying} idx=${s.currentIndex} pos=${s.position}/${s.duration}.`
-        );
-      }
-    } else {
-      patch("t7", "fail", `getState errored: ${String((t7 as any).e?.message ?? (t7 as any).e)}`);
     }
 
     setRunning(false);
@@ -387,8 +316,8 @@ export default function DiagnosticsScreen() {
               <Fix
                 title="Plugin not registered"
                 cmd="MainActivity.java → before super.onCreate():
-registerPlugin(MediaScannerPlugin.class);
-registerPlugin(PlaybackPlugin.class);"
+registerPlugin(AudenicMediaPlugin.class);
+registerPlugin(MediaScannerPlugin.class);"
               />
               <Fix
                 title="Permission denied"
@@ -400,8 +329,8 @@ registerPlugin(PlaybackPlugin.class);"
 # If 0 there too: emulator has no audio. Drag MP3 into /sdcard/Music/."
               />
               <Fix
-                title="Service not bound"
-                cmd="adb logcat -s AudenicPlayback PlaybackPlugin -v time
+                title="Playback service not bound"
+                cmd="adb logcat -s AudenicMediaPlugin AudenicPlaybackService -v time
 # Should print 'Service created' then 'Service bound successfully'.
 # If not: rebuild APK after `npx cap sync android`."
               />

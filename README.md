@@ -197,8 +197,6 @@ audenic-music/
 │   ├── components/    shared UI
 │   ├── auth/ hooks/ lib/ utils/ data/ onboarding/
 ├── android/           Capacitor Android shell (Java) + audiofx pipeline — the live code
-├── native/android/    bootstrap template: copies of the plugin + service used when
-│                      re-adding the platform with `npx cap add android` (see its README)
 ├── src-tauri/         Tauri 2 desktop shell
 ├── assets/            animated SVG diagrams used by this README
 ├── HANDOVER.md        current build state, blockers and open work
@@ -217,8 +215,8 @@ Tracked in detail in [HANDOVER.md](HANDOVER.md):
 - **Native reverb fidelity** — `PresetReverb` offers four coarse presets against the four generated convolution impulses used on web.
 - **`targetSdk 36` behaviour changes** — edge-to-edge enforcement makes the status/nav-bar colour calls in `MainActivity` no-ops, and `usesCleartextTraffic="true"` is on Android 17's deprecation path; both need a pass on real devices.
 - **Android 17 background-audio hardening** — playback is compliant today (explicit `mediaPlayback` foreground-service type, media3 audio focus, wake lock, `POST_NOTIFICATIONS` requested on the play path), but it has never been exercised against `adb shell cmd audio set-enable-hardening enable`. That check, and the targetSdk-37 while-in-use requirement, are still outstanding — see HANDOVER.md.
-- **Duplicate native plugins** — `AudenicMedia` is live; the older `AudenicPlayback` plugin is registered but unused and should be retired.
-- **Duplicated native sources** — `native/android/*.java` are bootstrap copies that have drifted behind the live files under `android/app/src/main/java/fm/audenic/app/`. Re-running the documented copy step there would silently drop the wakelock, prev-command and reverb fixes; refresh or delete those copies first. That guide also quotes media3 `1.4.1` while the app builds against `1.3.1`.
+- **~~Duplicate native plugins~~ (resolved)** — the dead `AudenicPlayback`/`PlaybackPlugin.java` plugin has been retired: removed from `MainActivity.java`'s `registerPlugin()` calls, deleted, and its last caller (`nativeBridge.ts`'s `loadQueueNative`) now talks to the live `AudenicMedia` plugin directly. `AudenicMedia` is the only native playback plugin.
+- **~~Duplicated native sources~~ (resolved)** — the drifted `native/android/` bootstrap template (stale copies of the plugin + service, hundreds of lines behind the live files and quoting media3 `1.4.1` against the real `1.3.1`) has been removed. If you ever re-run `npx cap add android`, copy directly from `android/app/src/main/java/fm/audenic/app/` — there is no bootstrap template to paste from anymore.
 - **On-device verification** — the latest playback, wakelock and reverb work is code-complete and type-checks clean, but has not yet been exercised on physical Android hardware.
 
 ---

@@ -39,6 +39,19 @@ export const platform = (): "web" | "android" | "ios" => {
   return (window as CapWindow).Capacitor?.getPlatform?.() ?? "web";
 };
 
+// Shared URI sanitizer — Android content:// / file:// paths can legitimately contain
+// a bare "%", "#", or "?" (e.g. "Track #1 100%.mp3") which breaks Capacitor's internal
+// decodeURIComponent() and throws "URI malformed". Escape those characters only when
+// they are NOT already part of a valid %XX escape sequence, so already-encoded URIs
+// are left untouched.
+function sanitizeUri(uri: string): string {
+  if (!uri) return uri;
+  return uri
+    .replace(/%(?![0-9A-Fa-f]{2})/g, "%25")
+    .replace(/#/g, "%23")
+    .replace(/\?/g, "%3F");
+}
+
 export async function scanNativeMedia(kind: "audio" | "video" = "audio"): Promise<NativeMediaItem[]> {
   if (!isNative()) return [];
   try {
@@ -52,9 +65,9 @@ export async function scanNativeMedia(kind: "audio" | "video" = "audio"): Promis
         if (res?.tracks && Array.isArray(res.tracks) && res.tracks.length > 0) {
           return res.tracks.map((t) => {
             const rawUri = t.contentUri || t.path || "";
-            const webPath = rawUri ? (cap?.convertFileSrc?.(rawUri.replace(/%(?![0-9A-Fa-f]{2})/g, "%25")) || rawUri) : "";
+            const webPath = rawUri ? (cap?.convertFileSrc?.(sanitizeUri(rawUri)) || rawUri) : "";
             const rawArt = t.albumArtFilePath ? `file://${t.albumArtFilePath}` : (t.albumArt || "");
-            const convertedArt = rawArt ? (cap?.convertFileSrc?.(rawArt) || rawArt) : "";
+            const convertedArt = rawArt ? (cap?.convertFileSrc?.(sanitizeUri(rawArt)) || rawArt) : "";
             return {
               id: String(t.id),
               uri: rawUri,
@@ -84,8 +97,7 @@ export async function scanNativeMedia(kind: "audio" | "video" = "audio"): Promis
       let webPath = x.webPath;
       if (!webPath && x.uri) {
         try {
-          const sanitized = x.uri.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
-          webPath = cap?.convertFileSrc?.(sanitized) || x.uri;
+          webPath = cap?.convertFileSrc?.(sanitizeUri(x.uri)) || x.uri;
         } catch {
           webPath = x.uri;
         }
@@ -155,9 +167,10 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   } catch { return false; }
 }
 
-/** Load and start playing an entire track queue in native ExoPlayer.
- *  Prefers the new AudenicPlayback plugin (granular setQueueAndPlay) and
- *  falls back to the legacy AudenicMedia.loadQueue path. */
+/** Load and start playing an entire track queue in native ExoPlayer via the
+ *  live AudenicMedia.loadQueue path. (The old "AudenicPlayback"/PlaybackPlugin
+ *  plugin this used to try first was retired — it was registered but dead;
+ *  see HANDOVER.md.) */
 export async function loadQueueNative(
   items: { id: string; uri?: string; src?: string; title: string; artist: string; coverUrl?: string; cover?: string; duration?: number }[],
   startIndex = 0,
@@ -167,27 +180,6 @@ export async function loadQueueNative(
 
   await ensureNotificationPermission();
 
-  // Try the primary AudenicPlayback plugin
-  try {
-    const newPlugin = (window as CapWindow).Capacitor?.Plugins?.AudenicPlayback;
-    if (newPlugin?.setQueueAndPlay) {
-      const tracks = items.map((t) => ({
-        id: String(t.id),
-        title: t.title,
-        artist: t.artist,
-        album: "",
-        src: String(t.uri ?? t.src ?? ""),
-        cover: String(t.coverUrl ?? t.cover ?? ""),
-        duration: Number(t.duration || 0),
-      }));
-      await newPlugin.setQueueAndPlay({ tracks, startIndex });
-      return true;
-    }
-  } catch (e) {
-    console.warn("[nativeBridge] AudenicPlayback.setQueueAndPlay failed, falling back to legacy", e);
-  }
-
-  // Legacy fallback (AudenicMedia.loadQueue)
   try {
     const plugin = (window as CapWindow).Capacitor?.Plugins?.AudenicMedia;
     if (plugin?.loadQueue) {
@@ -195,7 +187,7 @@ export async function loadQueueNative(
       return true;
     }
   } catch (e) {
-    console.warn("[nativeBridge] legacy loadQueue failed", e);
+    console.warn("[nativeBridge] AudenicMedia.loadQueue failed", e);
   }
   return false;
 }

@@ -19,8 +19,26 @@ export class ErrorBoundary extends Component<Props, State> {
     return { hasError: true, error };
   }
 
+  private autoRecovered = false;
+
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught Audenic UI Error:", error, errorInfo);
+
+    // "URI malformed" comes from encodeURI() choking on a media path that
+    // contains a stray % (badly-tagged MP3/cover paths from MediaStore). The
+    // sanitizers cover new scans, but a previously cached library can still
+    // hold a bad path — so drop the stale caches and re-render once instead of
+    // trapping the user on this screen every time they open My Music.
+    const msg = String(error?.message || "");
+    if (/URI malformed|malformed URI/i.test(msg) && !this.autoRecovered) {
+      this.autoRecovered = true;
+      try {
+        localStorage.removeItem("au.localTracks");
+        localStorage.removeItem("au.localVideos");
+      } catch { /* ignore */ }
+      // Defer so React finishes unwinding this render pass first.
+      window.setTimeout(() => this.setState({ hasError: false, error: null }), 0);
+    }
   }
 
   private handleReload = () => {

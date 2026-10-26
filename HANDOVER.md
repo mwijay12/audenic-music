@@ -118,11 +118,10 @@ adb shell am memory-limiter status     # Android 17 RAM-based app limits (exit R
 ```
 
 
-### A. BLOCKER: toolchain is too old for compileSdk 36 (build will fail)
-`android/build.gradle` is still `com.android.tools.build:gradle:8.7.2` and the wrapper is Gradle `8.9-all`. AGP 8.7.x tops out at compileSdk 35, so API 36 will be rejected.
-- Bump **AGP to ≥ 8.11** (ideally latest stable) and **Gradle** to the matching distribution in `android/gradle/wrapper/gradle-wrapper.properties`.
-- Check Capacitor 6 compatibility while doing it; if AGP/Gradle can't move, either downgrade to compileSdk 35 or add `android.suppressUnsupportedCompileSdk=36` to `android/gradle.properties` as a temporary measure (not recommended for release).
-- Then: `cd android && ./gradlew assembleDebug`.
+### A. BLOCKER: toolchain is too old for compileSdk 36 (build will fail) — **bumped, unverified**
+`android/build.gradle` has been bumped from `com.android.tools.build:gradle:8.7.2` to `8.13.2`, and `android/gradle/wrapper/gradle-wrapper.properties` from Gradle `8.9-all` to `8.13-all` (AGP 8.13 supports up to API 36.1, requires Gradle ≥8.13 and JDK 17 — see Android's AGP 8.11/8.13 release notes). This is a config-only change made in a sandbox with **no Android SDK / JDK 17 / Gradle available**, so it has **not** been build-verified.
+- Still needed: `cd android && ./gradlew assembleDebug` on a real toolchain to confirm the bump actually resolves, Capacitor 6 stays compatible, and no other AGP 8.13 migration warnings surface.
+- If that fails, fall back to downgrading compileSdk to 35 or `android.suppressUnsupportedCompileSdk=36` in `android/gradle.properties` as a temporary measure (not recommended for release).
 
 ### B. targetSdk 36/37 leftovers
 - Android 16 forces **edge-to-edge** for `targetSdk 36` and, as a consequence,
@@ -166,9 +165,9 @@ muted); then run the `adb shell cmd audio set-enable-hardening enable` recipe ab
 user who skipped onboarding** (the `POST_NOTIFICATIONS` path added this round).
 
 ### E. Cleanup / open decisions
-- **Duplicate native plugins**: `AudenicMediaPlugin.java` (`AudenicMedia`) is the live one; `PlaybackPlugin.java` (`AudenicPlayback`) is registered but essentially dead. Retire one to stop future edits landing in the wrong class.
-- **Duplicated + drifted native sources**: `native/android/AudenicMediaPlugin.java` and `native/android/AudenicPlaybackService.java` are bootstrap copies that `native/android/README.md` tells you to paste into `android/app/src/main/java/fm/audenic/app/` after `npx cap add android`. They are now **behind** the live files (`diff` confirms), so following that guide would silently revert the wake lock, the `"prev"`/`"previous"` fix and `setNativeReverb` — **and everything from round 2 above** (audio attributes/focus, `ServiceCompat.startForeground` with the `mediaPlayback` type, `endForegroundState`, the reordered lock-screen actions, the wake-lock renewal, and `requestNotifications`). Either refresh those copies from the live sources or delete them and the guide. That README also quotes media3 `1.4.1` while `android/app/build.gradle` pins `1.3.1`.
+- **~~Duplicate native plugins~~ (done)**: dead `PlaybackPlugin.java`/`AudenicPlayback` retired — deleted (moved to `.trash/`), its `registerPlugin()` call removed from `MainActivity.java`, `DiagnosticsScreen.tsx`'s tests 6/7 removed, and `nativeBridge.ts`'s `loadQueueNative` (last caller) now calls `AudenicMedia.loadQueue` directly instead of trying the dead plugin first. `AudenicMediaPlugin.java` (`AudenicMedia`) is the sole native playback plugin.
+- **~~Duplicated + drifted native sources~~ (done)**: the stale `native/android/` bootstrap template (`AudenicMediaPlugin.java`, `AudenicPlaybackService.java`, `README.md` — hundreds of lines behind the live files and quoting media3 `1.4.1` against the real `1.3.1`) has been deleted (moved to `.trash/`). README.md's repo-layout and known-limitations sections updated to match. If re-adding the Android platform, copy straight from `android/app/src/main/java/fm/audenic/app/`.
 - **EQ unit mismatch to confirm**: web passes 5 band values into native `setNativeEq(int[] bandLevels, ...)` while Android `Equalizer` works in millibels over device-specific band counts/ranges. Verify scaling and clamping on at least two OEM devices, and map web band count → device band count.
-- **License conflict (unresolved)**: `README.md` says MIT while commit `c50055f chore: enforce Altraware Proprietary License` and `LICENSE` assert a proprietary licence. Needs an owner decision.
+- **~~License conflict~~ (resolved)**: `README.md`'s License section and `LICENSE` both now state the Altraware Technologies Proprietary License (commit `c50055f`); no stray MIT text remains anywhere in the repo (verified by repo-wide grep). No further owner decision needed on this point.
 - `audenic_flutter/` and `src-tauri/` (desktop) — decide keep or delete.
 - Smart Automix / DJ crossfade (`smartAutomix.ts`) runs entirely on Web Audio, so it is inert on native; automix on Android needs either the native queue's own gapless/crossfade or an accepted feature-reduction.

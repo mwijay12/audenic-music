@@ -100,7 +100,10 @@ function buildEmptyLibrary(): VideoLibrary {
 function safeConvertFileSrc(path: string | null | undefined): string {
   if (!path) return "";
   try {
-    const sanitized = path.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+    const sanitized = path
+      .replace(/%(?![0-9A-Fa-f]{2})/g, "%25")
+      .replace(/#/g, "%23")
+      .replace(/\?/g, "%3F");
     return Capacitor.convertFileSrc(sanitized);
   } catch (err) {
     return path || "";

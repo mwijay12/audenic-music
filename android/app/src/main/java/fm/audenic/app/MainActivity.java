@@ -17,7 +17,6 @@ public class MainActivity extends BridgeActivity {
         // This is critical so Capacitor bridge registers plugins properly on initialization.
         registerPlugin(AudenicMediaPlugin.class);
         registerPlugin(MediaScannerPlugin.class);
-        registerPlugin(PlaybackPlugin.class);
         registerPlugin(VideoScannerPlugin.class);
         registerPlugin(LrcReaderPlugin.class);
 

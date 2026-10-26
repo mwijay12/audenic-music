@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { LIBRARY_CHIPS } from "../data/tracks";
 import { usePlayer, svgCover } from "../player/PlayerContext";
 import { Chip, IconButton, StatusBar, TrackRow } from "../components/Shell";
-import { Back, Dots, Scan, Shuffle, Video, Play, Plus, Search, CheckSquare } from "../components/Icons";
+import { Back, Dots, Scan, Shuffle, Video, Play, Plus, Search, CheckSquare, Filter, Check } from "../components/Icons";
 import { isNative } from "../player/nativeBridge";
 import { isDesktop } from "../player/tauriBridge";
 import { VirtualList } from "../components/VirtualList";
@@ -14,6 +14,8 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
   const [chip, setChip] = useState("All");
   const [q, setQ] = useState("");
   const [menu, setMenu] = useState(false);
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<"default" | "dateAdded" | "az" | "za" | "mostPlayed">("default");
   const [newPl, setNewPl] = useState(false);
   const [plName, setPlName] = useState("");
   const [r2Uploading, setR2Uploading] = useState(false);
@@ -103,10 +105,21 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
 
     if (q.trim()) {
       const query = q.toLowerCase().trim();
-      return base.filter(t => (t.title + " " + t.artist + " " + (t.tags || []).join(" ")).toLowerCase().includes(query));
+      base = base.filter(t => (t.title + " " + t.artist + " " + (t.tags || []).join(" ")).toLowerCase().includes(query));
     }
+
+    if (sortBy === "dateAdded") {
+      base = [...base].sort((a, b) => (addedAt[b.id] || 0) - (addedAt[a.id] || 0));
+    } else if (sortBy === "az") {
+      base = [...base].sort((a, b) => a.title.localeCompare(b.title));
+    } else if (sortBy === "za") {
+      base = [...base].sort((a, b) => b.title.localeCompare(a.title));
+    } else if (sortBy === "mostPlayed") {
+      base = [...base].sort((a, b) => (playCounts[b.id] || 0) - (playCounts[a.id] || 0));
+    }
+
     return base;
-  }, [chip, tracks, localTracks, liked, q]);
+  }, [chip, tracks, localTracks, liked, q, sortBy, addedAt, playCounts]);
 
   const showPlaylists = chip === "Playlists";
 
@@ -243,19 +256,53 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
         {LIBRARY_CHIPS.map(c => <Chip key={c} label={c} active={chip === c} onClick={() => setChip(c)} />)}
       </div>
 
-      {/* Search Input Bar */}
+      {/* Search Input Bar + Sort/Filter */}
       <div className="px-6 py-1.5">
-        <div className="relative flex items-center">
-          <span className="absolute left-3.5 text-white/40"><Search size={16} /></span>
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search songs, artists, or local files..."
-            className="w-full rounded-2xl border border-white/12 bg-white/[0.06] pl-10 pr-9 py-2.5 text-[13px] text-white outline-none placeholder:text-white/40 focus:border-[var(--accent)]"
-          />
-          {q && (
-            <button onClick={() => setQ("")} className="absolute right-3.5 text-[12px] font-bold text-white/50 hover:text-white">✕</button>
-          )}
+        <div className="flex items-center gap-2">
+          <div className="relative flex flex-1 items-center">
+            <span className="absolute left-3.5 text-white/40"><Search size={16} /></span>
+            <input
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search songs, artists, or local files..."
+              className="w-full rounded-2xl border border-white/12 bg-white/[0.06] pl-10 pr-9 py-2.5 text-[13px] text-white outline-none placeholder:text-white/40 focus:border-[var(--accent)]"
+            />
+            {q && (
+              <button onClick={() => setQ("")} className="absolute right-3.5 text-[12px] font-bold text-white/50 hover:text-white">✕</button>
+            )}
+          </div>
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setSortOpen(v => !v)}
+              className={`grid h-[42px] w-[42px] place-items-center rounded-2xl border transition ${sortBy !== "default" ? "border-[var(--accent)]/50 bg-[var(--accent)]/15 text-[var(--accent)]" : "border-white/12 bg-white/[0.06] text-white/60 hover:text-white"}`}
+              title="Sort & filter"
+            >
+              <Filter size={16} />
+            </button>
+            {sortOpen && (
+              <>
+                <div className="fixed inset-0 z-40" onClick={() => setSortOpen(false)} />
+                <div className="absolute right-0 top-[48px] z-50 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#17171c] py-1.5 shadow-[0_20px_50px_rgba(0,0,0,0.6)]">
+                  {([
+                    { id: "default", label: "Default order" },
+                    { id: "dateAdded", label: "Date added (newest)" },
+                    { id: "az", label: "Title A → Z" },
+                    { id: "za", label: "Title Z → A" },
+                    { id: "mostPlayed", label: "Most played" },
+                  ] as const).map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => { setSortBy(opt.id); setSortOpen(false); }}
+                      className="flex w-full items-center justify-between px-4 py-2.5 text-left text-[13px] text-white hover:bg-white/5"
+                    >
+                      <span>{opt.label}</span>
+                      {sortBy === opt.id && <Check size={14} className="text-[var(--accent)]" />}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -340,7 +387,7 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
             overscan={10}
             bottomPad={160}
             className="px-6 h-full"
-            onScrollChange={(top) => setIsScrolled(top > 25)}
+            onScrollChange={(top) => { setIsScrolled(top > 25); setScrollTop(top); }}
             renderItem={(t) => (
               <TrackRow
                 key={t.id}
