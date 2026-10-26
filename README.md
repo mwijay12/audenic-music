@@ -1,169 +1,236 @@
-# Audenic — Cross-Platform Music & Video Studio
-
-Audenic is a high-performance audio workstation and media player engineered for desktop and mobile. Built with TypeScript, React 19, Tauri v2, and a custom Web Audio DSP pipeline, Audenic delivers low-latency playback, Camelot harmonic key matching, real turntable pitch bending, parametric equalization, and cloud-synced media streaming.
-
----
-
-## Architectural Highlights
-
-- **Web Audio DSP Pipeline**: Direct signal routing via `AudioContext` with zero-latency 5-band parametric EQ, bass boost shelving filters, spatial convolver reverb, and dynamic loudness normalization.
-- **Harmonic DJ & Automix Station**: 
-  - Real-time tempo estimation using onset energy-flux analysis and harmonic histogram bin smoothing.
-  - Musical key classification via Chromagram analysis and Krumhansl-Schmuckler correlation (Camelot wheel compatible).
-  - Turntable pitch bending with selectable Key Lock (Master Tempo) and momentary ±6% beat-matching nudges.
-  - DSP automix transition engine supporting resonant low-pass sweep, high-pass sweep, echo out, and beat-synced morphing.
-- **Tauri v2 Desktop Shell**: Frameless desktop window with custom system titlebar, GPU-accelerated floating mini-player (PIP), global keyboard shortcuts, and Windows media notification integration (`MediaSession`).
-- **Course & Video Player**: Integrated 1080p video player with PiP support, folder hierarchy navigation, and instant MP3 audio-only extraction mode.
-- **Vertical Reel Player**: Smooth-snapping vertical video feed with GPU compositing (`will-change: scroll-position`) and deterministic scroll stops.
-- **Global Radio Streamer**: Access to 30,000+ live international radio stations powered by Radio-Browser distributed mirrors.
+<div align="center">
+  <img src="assets/hero.svg" alt="Audenic" width="100%" />
+  <h1>Audenic</h1>
+  <p><strong>A native-grade music and video studio that runs one TypeScript codebase on Android, Windows, Linux and the web.</strong></p>
+  <p>
+    React 19 · TypeScript · Vite 7 · Web Audio DSP · Capacitor 6 (Android, API 36) · Tauri 2 (desktop)
+  </p>
+</div>
 
 ---
 
-## Architecture Overview
+Audenic is a personal media workstation: a player, an equaliser suite, a harmonic DJ automix
+station, a video/reels surface and a 30 000-station radio browser — all driven by one React
+front end. What makes it unusual is the **dual audio back end**: the same effect graph is
+rendered by Web Audio on web/desktop and re-created inside Android's own audio stack
+(`android.media.audiofx` attached to ExoPlayer) on Android, so playback survives the lock
+screen, notification controls and battery savers instead of being throttled by a WebView.
 
-```
-                          ┌───────────────────────────┐
-                          │   Audenic UI Workspace    │
-                          │   (React 19 + TypeScript) │
-                          └─────────────┬─────────────┘
-                                        │
-           ┌────────────────────────────┼────────────────────────────┐
-           ▼                            ▼                            ▼
-┌─────────────────────┐      ┌─────────────────────┐      ┌─────────────────────┐
-│   Web Audio DSP     │      │   Virtual DJ Engine │      │   Tauri v2 Shell    │
-│  - 5-Band Parametric│      │  - Flux BPM Onset   │      │  - Windows Native   │
-│  - Bass Shelving    │      │  - Camelot Analysis │      │  - OS Notifications │
-│  - Convolver Reverb │      │  - Pitch Bender     │      │  - Floating Mini PIP│
-│  - Dynamic Limiter  │      │  - Dual-Deck Morph  │      │  - File Associations│
-└─────────────────────┘      └─────────────────────┘      └─────────────────────┘
-```
+<div align="center">
+  <img src="assets/architecture.svg" alt="Audenic architecture" width="100%" />
+</div>
 
 ---
 
-## Desktop Keyboard Shortcuts
+## Feature map
 
-| Shortcut | Function |
+| Area | What it does |
 | :--- | :--- |
-| `Space` | Play / Pause toggle |
-| `Arrow Right` / `Arrow Left` | Seek forward / backward 5 seconds |
-| `Arrow Up` / `Arrow Down` | Master volume adjust (±5%) |
-| `M` | Mute / Unmute audio |
-| `F` | Fullscreen toggle |
-| `\` or `Ctrl + B` | Expand / Collapse navigation sidebar |
-| `Esc` | Close active overlay / Exit simple mode |
+| **Playback** | Queue, shuffle, repeat, gapless seek, sleep-friendly background audio, likes, progress restore |
+| **Equalizer suite** | 5-band parametric EQ, bass boost, reverb, loudness normalisation, live spectrum analyser |
+| **DJ mixer** | Resonant filter sweep, low/mid/high EQ kills, convolution reverb, stereo delay, tube saturation, automix transitions |
+| **Harmonic analysis** | Tempo estimation from onset energy flux, key detection via chromagram + Krumhansl–Schmuckler correlation, Camelot-wheel compatible |
+| **Library** | Local media scan, tag reading, folder hierarchy, playlists, artwork cache, Cloudflare R2 upload |
+| **Video** | 1080p course player with picture-in-picture, vertical snap-scroll reels, audio-only MP3 extraction mode |
+| **Radio** | 30 000+ live stations through Radio-Browser mirrors |
+| **Lyrics + AI** | `.lrc` synced lyrics, Gemini / Groq / Ollama-backed assistant, ElevenLabs voice |
+| **Accounts** | Firebase auth, Google Drive mode, achievements, analytics, admin and diagnostics surfaces |
+| **Android extras** | Foreground media service, notification + lock-screen actions, headset/Bluetooth media buttons, overlay and "island" controls |
 
 ---
 
-## Getting Started
+## Audio pipeline
+
+<div align="center">
+  <img src="assets/dsp-chain.svg" alt="Audenic signal chain" width="100%" />
+</div>
+
+Two implementations, one interface:
+
+| Stage | Web / desktop (`src/player/audioEngine.ts`, `audioEffects.ts`) | Android native (`AudenicPlaybackService.java`) |
+| :--- | :--- | :--- |
+| Source | `AudioContext` graph over `<audio>` | ExoPlayer (`media3` 1.3.1) |
+| EQ | 5 peaking/shelf `BiquadFilterNode`s | `android.media.audiofx.Equalizer` |
+| Bass | Low-shelf node | `android.media.audiofx.BassBoost` |
+| Reverb | Convolver with generated impulse responses (hall, room, plate, cathedral) | `android.media.audiofx.PresetReverb`, routed as an aux send via `Player.setAuxEffectInfo(AuxEffectInfo)` |
+| Master | Gain + loudness normalise + output gate | Player volume |
+| Visualiser | `AnalyserNode` | — |
+
+On Android the Web Audio graph is deliberately muted (`engine.muteOutput(isNative())`) because
+ExoPlayer owns the audio stream — the bridge in [`src/player/nativeBridge.ts`](src/player/nativeBridge.ts)
+mirrors every effect call into the native player instead. Effects without an `audiofx`
+counterpart (delay, filter sweep, EQ kills) therefore stay silent on Android; see
+[Known limitations](#known-limitations).
+
+## Native bridge surface
+
+`AudenicMedia` (Capacitor plugin, 12 methods) — [native/android/AudenicMediaPlugin.java](native/android/AudenicMediaPlugin.java)
+
+| Group | Methods |
+| :--- | :--- |
+| Library | `scan` · `delete` |
+| Transport | `playback` · `loadQueue` · `updatePosition` |
+| Effects | `setEqualizer` · `setReverb` |
+| System UI | `updateNotification` · `hasOverlayPermission` · `requestOverlayPermission` · `toggleIsland` |
+| Downloads | `download` |
+
+---
+
+## Supported platforms
+
+| Platform | Shell | Status |
+| :--- | :--- | :--- |
+| Android (min SDK 26, target SDK 36) | Capacitor 6 + Java | Primary target |
+| Windows | Tauri 2 | Supported, CI-built |
+| Linux | Tauri 2 | Supported, CI-built (AppImage, deb) |
+| Web / PWA | Vite build | Supported |
+| iOS | — | Not configured |
+| Flutter rewrite (`audenic_flutter/`) | — | Abandoned, kept for reference only |
+
+---
+
+## Keyboard shortcuts (desktop)
+
+| Shortcut | Action |
+| :--- | :--- |
+| `Space` | Play / pause |
+| `→` / `←` | Seek ±5 s |
+| `↑` / `↓` | Master volume ±5 % |
+| `M` | Mute |
+| `F` | Fullscreen |
+| `\` or `Ctrl+B` | Toggle sidebar |
+| `Esc` | Close overlay / simple mode |
+
+---
+
+## Getting started
 
 ### Prerequisites
 
-- **Node.js**: `v18.0.0` or newer
-- **Rust toolchain** *(for desktop executable builds)*: `rustc` and `cargo` (installable via [rustup.rs](https://rustup.rs))
-- **Platform Build Tools** *(Windows)*: Visual Studio C++ Build Tools with Windows 10/11 SDK
+- **Node.js** 18 or newer
+- **Android Studio** with an SDK platform matching API 36 — for the Android app
+- **Rust** ([rustup.rs](https://rustup.rs)) — only for Tauri desktop builds
+- **Windows**: Visual Studio C++ Build Tools with the Windows 10/11 SDK
 
-### Installation
+### Install
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/your-username/audenic-music.git
-   cd audenic-music
-   ```
-
-2. Install dependencies:
-   ```bash
-   npm install
-   ```
-
-3. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   *Populate `.env` with your API keys if you plan to use speech synthesis or cloud features.*
-
-### Development
-
-Start the Vite development server:
 ```bash
-npm run dev
+git clone https://github.com/mwijay12/audenic-music.git
+cd audenic-music
+npm install
+cp .env.example .env   # optional: only needed for AI, TTS and R2 features
 ```
 
-Start the native Tauri desktop development window:
+### Run the web app
+
 ```bash
-npm run tauri:dev
+npm run dev          # Vite dev server
+npm run build        # production bundle into dist/
 ```
 
----
+### Run on Android
 
-## Building Executables
-
-### Production Desktop Executable (Windows)
-
-To build the native Windows installer and standalone binary on a Windows workstation:
 ```bash
-npm run tauri:build
+npm run build            # required: dist/ is git-ignored, the shell loads it at runtime
+npx cap sync android
+npx cap open android     # then Build > Run in Android Studio
 ```
 
-The build outputs will be generated in `src-tauri/target/release/`:
-- **Setup Installer**: `src-tauri/target/release/bundle/nsis/Audenic_2.0.0_x64-setup.exe`  
-  *(Recommended for end users — includes desktop shortcut, Start Menu integration, and file associations for MP3/FLAC/WAV/MP4).*
-- **Portable Executable**: `src-tauri/target/release/audenic.exe`  
-  *(Standalone portable binary that runs instantly without installation).*
+The full Android walkthrough — permissions, WebView tuning, notification icon, signed
+release APK/AAB, gesture and feature-permission maps — lives in
+[ANDROID_SETUP.md](ANDROID_SETUP.md).
 
-### Production Desktop Executable (Linux)
+> **Before you build:** `android/variables.gradle` targets API 36, which the pinned Android
+> Gradle Plugin in `android/build.gradle` may reject. If Gradle reports an unsupported
+> `compileSdkVersion`, raise AGP (and the matching Gradle wrapper) instead of dropping the SDK level.
 
-To build the native Linux packages on an Ubuntu/Debian environment:
+### Run on desktop
+
 ```bash
-# 1. Install prerequisites
+npm run tauri:dev     # hot-reloading window
+npm run tauri:build   # installers
+```
+
+Linux build prerequisites:
+
+```bash
 sudo apt-get update
 sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
-
-# 2. Build binaries
-npm run tauri:build
 ```
 
-The build outputs will be generated in `src-tauri/target/release/bundle/`:
-- **Universal AppImage**: `bundle/appimage/Audenic_2.0.0_amd64.AppImage`  
-  *(Universal portable package compatible with Ubuntu, Debian, Fedora, Arch, Manjaro, etc. To run: `chmod +x Audenic_2.0.0_amd64.AppImage && ./Audenic_2.0.0_amd64.AppImage`)*
-- **Debian / Ubuntu Package**: `bundle/deb/audenic_2.0.0_amd64.deb`  
-  *(Installs system-wide: `sudo dpkg -i audenic_2.0.0_amd64.deb`)*
+Desktop outputs land in `src-tauri/target/release/`:
 
-### Automated Multi-Platform Cloud Builds (GitHub Actions)
+- `bundle/nsis/Audenic_2.0.0_x64-setup.exe` — Windows installer (file associations for MP3/FLAC/WAV/MP4)
+- `bundle/appimage/Audenic_2.0.0_amd64.AppImage` — portable Linux
+- `bundle/deb/audenic_2.0.0_amd64.deb` — system-wide Linux package
 
-Audenic features an automated CI/CD pipeline configured at `.github/workflows/build.yml`. Every time code is pushed to `main` or a release tag `v*` is created:
-1. GitHub runners spin up clean **Ubuntu 22.04** and **Windows** build environments.
-2. Web assets are bundled and the native Rust shell compiles with maximum optimization.
-3. Linux `.AppImage`, `.deb`, and Windows `.exe`, `.msi` are generated and uploaded directly to the GitHub Release and Actions artifacts.
+### CI
 
-### Web Production Bundle
+[`.github/workflows/build.yml`](.github/workflows/build.yml) builds Linux and Windows
+artifacts on every push to `main` and on `v*` tags, then attaches them to the release.
 
-To build the optimized client web bundle:
-```bash
-npm run build
+---
+
+## Configuration
+
+Credentials stay out of the source tree; `.env` is git-ignored and `.env.example` documents
+every key.
+
+| Variable | Purpose |
+| :--- | :--- |
+| `VITE_GEMINI_KEYS` | Comma-separated keys for the assistant and lyric processing |
+| `VITE_GROQ_KEYS` | Fast inference fallback |
+| `VITE_ELEVENLABS_TTS_KEYS` | Text-to-speech voice synthesis |
+| `VITE_R2_*` | Cloudflare R2 bucket credentials for audio distribution |
+
+---
+
+## Repository layout
+
 ```
-The output will be placed in the `dist/` directory.
-
-### Android Native Build (Capacitor)
-
-```bash
-npm run build
-npx cap sync android
-npx cap open android
+audenic-music/
+├── src/
+│   ├── player/        audio engine, effects rack, DJ + automix engine, native + Tauri bridges
+│   ├── screens/       25 product surfaces (Home, Now Playing, Equalizer, DJ Mixer, Reels, …)
+│   ├── components/    shared UI
+│   ├── auth/ hooks/ lib/ utils/ data/ onboarding/
+├── android/           Capacitor Android shell (Java) + audiofx pipeline
+├── native/android/    source of truth for the plugin + playback service files
+├── src-tauri/         Tauri 2 desktop shell
+├── assets/            animated SVG diagrams used by this README
+├── HANDOVER.md        current build state, blockers and open work
+└── .github/workflows/ multi-platform release CI
 ```
 
 ---
 
-## Security & Environment Variables
+## Known limitations
 
-Audenic separates client source code from credentials. Never commit your `.env` file to version control. The repository includes a `.env.example` file detailing all supported configuration parameters:
+Tracked in detail in [HANDOVER.md](HANDOVER.md):
 
-- `VITE_GEMINI_KEYS` — Comma-separated API keys for natural language assistant and lyric processing
-- `VITE_GROQ_KEYS` — Ultra-fast inference keys for offline-first fallback
-- `VITE_ELEVENLABS_TTS_KEYS` — Voice synthesis keys for text-to-speech
-- `VITE_R2_*` — Cloudflare R2 bucket credentials for direct audio asset distribution
+- **Android Gradle Plugin vs API 36** — the pinned AGP may refuse `compileSdkVersion 36`; bump AGP + Gradle wrapper.
+- **Effects with no `audiofx` equivalent** — delay, DJ filter sweep and the three EQ kills are Web-Audio only, so they are silent on Android.
+- **Flanger** — exposed in the effects state but not implemented on any platform yet.
+- **Native reverb fidelity** — `PresetReverb` offers four coarse presets against the four generated convolution impulses used on web.
+- **`targetSdk 36` behaviour changes** — edge-to-edge enforcement and `RECEIVER_EXPORTED` flags need a pass on real devices.
+- **Duplicate native plugins** — `AudenicMedia` is live; the older `AudenicPlayback` plugin is registered but unused and should be retired.
+- **On-device verification** — the latest playback, wakelock and reverb work is code-complete and type-checks clean, but has not yet been exercised on physical Android hardware.
 
 ---
+
+## Contributing
+
+Fork the repository, branch from `main`, and keep changes inside `src/` unless you are
+deliberately touching the Android or Tauri shells. Run `npm run build` before
+`npx cap sync android` so the native shell picks up the new bundle.
 
 ## License
 
-This project is licensed under the MIT License.
+Copyright © 2026 **Altraware Technologies** (David Erick Mwijage). All rights reserved.
+This source code is proprietary to Altraware Technologies and may not be copied, modified,
+distributed, sold, or otherwise used without explicit written permission. Full terms in
+[LICENSE](LICENSE); licensing inquiries via [github.com/mwijay12](https://github.com/mwijay12).
+
+<div align="center">
+  <sub>Built with React 19 · TypeScript · Vite 7 · Capacitor 6 · Tauri 2 · ExoPlayer · Web Audio API</sub>
+</div>
