@@ -42,6 +42,7 @@ Test matrix: next/prev/play/pause from notification **and** lock screen; headpho
 
 ### E. Cleanup / open decisions
 - **Duplicate native plugins**: `AudenicMediaPlugin.java` (`AudenicMedia`) is the live one; `PlaybackPlugin.java` (`AudenicPlayback`) is registered but essentially dead. Retire one to stop future edits landing in the wrong class.
+- **Duplicated + drifted native sources**: `native/android/AudenicMediaPlugin.java` and `native/android/AudenicPlaybackService.java` are bootstrap copies that `native/android/README.md` tells you to paste into `android/app/src/main/java/fm/audenic/app/` after `npx cap add android`. They are now **behind** the live files (`diff` confirms), so following that guide would silently revert the wake lock, the `"prev"`/`"previous"` fix and `setNativeReverb`. Either refresh those copies from the live sources or delete them and the guide. That README also quotes media3 `1.4.1` while `android/app/build.gradle` pins `1.3.1`.
 - **EQ unit mismatch to confirm**: web passes 5 band values into native `setNativeEq(int[] bandLevels, ...)` while Android `Equalizer` works in millibels over device-specific band counts/ranges. Verify scaling and clamping on at least two OEM devices, and map web band count → device band count.
 - **License conflict (unresolved)**: `README.md` says MIT while commit `c50055f chore: enforce Altraware Proprietary License` and `LICENSE` assert a proprietary licence. Needs an owner decision.
 - `audenic_flutter/` and `src-tauri/` (desktop) — decide keep or delete.

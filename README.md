@@ -64,7 +64,9 @@ counterpart (delay, filter sweep, EQ kills) therefore stay silent on Android; se
 
 ## Native bridge surface
 
-`AudenicMedia` (Capacitor plugin, 12 methods) — [native/android/AudenicMediaPlugin.java](native/android/AudenicMediaPlugin.java)
+`AudenicMedia` (Capacitor plugin, 12 methods) — live source:
+[android/app/src/main/java/fm/audenic/app/AudenicMediaPlugin.java](android/app/src/main/java/fm/audenic/app/AudenicMediaPlugin.java),
+service: [AudenicPlaybackService.java](android/app/src/main/java/fm/audenic/app/AudenicPlaybackService.java)
 
 | Group | Methods |
 | :--- | :--- |
@@ -194,8 +196,9 @@ audenic-music/
 │   ├── screens/       25 product surfaces (Home, Now Playing, Equalizer, DJ Mixer, Reels, …)
 │   ├── components/    shared UI
 │   ├── auth/ hooks/ lib/ utils/ data/ onboarding/
-├── android/           Capacitor Android shell (Java) + audiofx pipeline
-├── native/android/    source of truth for the plugin + playback service files
+├── android/           Capacitor Android shell (Java) + audiofx pipeline — the live code
+├── native/android/    bootstrap template: copies of the plugin + service used when
+│                      re-adding the platform with `npx cap add android` (see its README)
 ├── src-tauri/         Tauri 2 desktop shell
 ├── assets/            animated SVG diagrams used by this README
 ├── HANDOVER.md        current build state, blockers and open work
@@ -214,6 +217,7 @@ Tracked in detail in [HANDOVER.md](HANDOVER.md):
 - **Native reverb fidelity** — `PresetReverb` offers four coarse presets against the four generated convolution impulses used on web.
 - **`targetSdk 36` behaviour changes** — edge-to-edge enforcement and `RECEIVER_EXPORTED` flags need a pass on real devices.
 - **Duplicate native plugins** — `AudenicMedia` is live; the older `AudenicPlayback` plugin is registered but unused and should be retired.
+- **Duplicated native sources** — `native/android/*.java` are bootstrap copies that have drifted behind the live files under `android/app/src/main/java/fm/audenic/app/`. Re-running the documented copy step there would silently drop the wakelock, prev-command and reverb fixes; refresh or delete those copies first. That guide also quotes media3 `1.4.1` while the app builds against `1.3.1`.
 - **On-device verification** — the latest playback, wakelock and reverb work is code-complete and type-checks clean, but has not yet been exercised on physical Android hardware.
 
 ---
