@@ -8,6 +8,8 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.ServiceInfo;
+import androidx.media3.common.AudioAttributes;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -34,6 +36,8 @@ import android.util.Log;
 
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
+import androidx.core.app.NotificationManagerCompat;
+import androidx.core.app.ServiceCompat;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
@@ -128,10 +132,15 @@ public class AudenicPlaybackService extends Service {
                     wakeLock.setReferenceCounted(false);
                 }
             }
-            if (wakeLock != null && !wakeLock.isHeld()) {
-                // 10 min safety timeout; renewed on every play()/track change so it
-                // never actually expires during continuous playback, but it protects
-                // against a leaked lock if release() is ever missed.
+            if (wakeLock != null) {
+                // 10 min safety timeout, renewed on every play()/track change so it never
+                // expires during continuous playback while still protecting against a leak.
+                // NOTE: the lock is non-reference-counted, so a held lock must be released
+                // before re-acquiring — `if (!isHeld())` alone would let a long session's
+                // lock silently lapse at minute 10 and stall decoding on aggressive OEMs.
+                if (wakeLock.isHeld()) {
+                    wakeLock.release();
+                }
                 wakeLock.acquire(10 * 60 * 1000L);
             }
         } catch (Exception e) {
@@ -146,6 +155,55 @@ public class AudenicPlaybackService extends Service {
             }
         } catch (Exception e) {
             Log.w(TAG, "Failed to release WakeLock: " + e.getMessage());
+        }
+    }
+
+    // ── Foreground service state (Android 16/17 background-audio hardening) ──
+    // Android 17 silences background audio (AudioTrack.write() muted, requestAudioFocus()
+    // → AUDIOFOCUS_REQUEST_FAILED) for any app that has neither a visible activity nor a
+    // running foreground service of a type other than SHORT_SERVICE. Failures are SILENT —
+    // no exception, no crash log. We therefore declare the FGS type explicitly every time,
+    // start it while the app is still visible (WIU capability for targetSdk 37+), and keep it
+    // running through transient interruptions instead of tearing it down on pause.
+    private volatile boolean foregroundActive = false;
+
+    /**
+     * Publishes the ongoing media notification. On first call this promotes the service to a
+     * foreground service with an explicit {@code mediaPlayback} type; later calls only update the
+     * notification, which avoids the repeated startForeground() churn (and the associated
+     * SystemUI flicker / IPC cost) of the previous implementation.
+     */
+    private void publishNotification(Notification notification) {
+        try {
+            if (!foregroundActive) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    ServiceCompat.startForeground(this, NOTIFICATION_ID, notification,
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+                } else {
+                    startForeground(NOTIFICATION_ID, notification);
+                }
+                foregroundActive = true;
+            } else {
+                NotificationManagerCompat.from(this).notify(NOTIFICATION_ID, notification);
+            }
+        } catch (Exception e) {
+            // SecurityException on Android 12+ when POST_NOTIFICATIONS was never granted, or
+            // ForegroundServiceStartNotAllowedException when called from the background.
+            Log.e(TAG, "publishNotification failed: " + e.getMessage(), e);
+            foregroundActive = false;
+        }
+    }
+
+    /** Ends the foreground state. Only for a genuine, permanent stop — never on pause. */
+    private void endForegroundState(boolean stopSelf) {
+        try {
+            ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE);
+        } catch (Exception e) {
+            Log.w(TAG, "stopForeground failed: " + e.getMessage());
+        }
+        foregroundActive = false;
+        if (stopSelf) {
+            try { stopSelf(); } catch (Exception ignored) {}
         }
     }
 
@@ -345,8 +403,7 @@ public class AudenicPlaybackService extends Service {
                     break;
                 case "stop":
                     pause();
-                    stopForeground(true);
-                    stopSelf();
+                    endForegroundState(true);
                     break;
                 case "updatePos":
                     long posMs = intent.getLongExtra("positionMs", 0L);
@@ -556,8 +613,7 @@ public class AudenicPlaybackService extends Service {
             // Nothing is playing — safe to let the service stop like a normal app close.
             runOnMainThread(() -> {
                 releaseWakeLockIfHeld();
-                stopForeground(true);
-                stopSelf();
+                endForegroundState(true);
             });
         }
         // else: keep playing in the background; START_STICKY + foreground notification
@@ -566,6 +622,23 @@ public class AudenicPlaybackService extends Service {
 
     private void initExoPlayer() {
         player = new ExoPlayer.Builder(this).build();
+
+        // Android 17 hardening explicitly names ExoPlayer/media3 as a component whose audio gets
+        // SILENCED when the app is non-compliant. Declaring USAGE_MEDIA + handing audio focus to
+        // media3's AudioFocusManager is also what makes ducking/pause-on-call work and is the
+        // prerequisite for the system treating us as a real media session owner.
+        player.setAudioAttributes(
+                new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build(),
+                /* handleAudioFocus = */ true);
+
+        // Pause instead of streaming into a disconnected output when headphones/Bluetooth drop.
+        player.setHandleAudioBecomingNoisy(true);
+        // Keep CPU alive across screen-off while ExoPlayer is loading or playing.
+        player.setWakeMode(androidx.media3.exoplayer.C.WAKE_MODE_NETWORK);
+
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int state) {
@@ -645,8 +718,7 @@ public class AudenicPlaybackService extends Service {
             @Override
             public void onStop() {
                 pause();
-                stopForeground(true);
-                stopSelf();
+                endForegroundState(true);
             }
         });
         mediaSession.setActive(true);
@@ -683,6 +755,12 @@ public class AudenicPlaybackService extends Service {
                 if (player != null) {
                     player.stop();
                 }
+                // Nothing is playing and nothing is queued. Release the CPU wake lock to save
+                // battery, but DELIBERATELY keep the mediaPlayback foreground service alive:
+                // Android 17 permits (and repeat/shuffle restarts from JS rely on) the service
+                // staying up so the next user-triggered play() is not a background FGS start.
+                isJsPlaying = false;
+                releaseWakeLockIfHeld();
                 if (eventListener != null) {
                     eventListener.onQueueEnded();
                 }
@@ -1050,8 +1128,10 @@ public class AudenicPlaybackService extends Service {
         PendingIntent closePending = PendingIntent.getBroadcast(this, 105, closeIntent, pendingFlags);
 
         // Build modern notification with 5 action slots:
-        //   [Like] [Previous] [Play/Pause] [Next] [Close]
-        // Compact view shows the 3 core controls: Previous | Play/Pause | Next (indices 1, 2, 3)
+        //   [Previous] [Play/Pause] [Next] [Like] [Close]
+        // Android 13+ / Android 16 media UI (lock screen, NotificationShade, cars, watches)
+        // surfaces only the FIRST THREE actions, so the transport controls must own slots 0-2.
+        // Previously Like sat in slot 0 and pushed Next out of the visible row.
         NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_music)
                 .setContentTitle(track.title)
@@ -1066,20 +1146,20 @@ public class AudenicPlaybackService extends Service {
                 .setStyle(
                         new androidx.media.app.NotificationCompat.MediaStyle()
                                 .setMediaSession(mediaSession != null ? mediaSession.getSessionToken() : null)
-                                .setShowActionsInCompactView(1, 2, 3)
+                                .setShowActionsInCompactView(0, 1, 2)
                                 .setShowCancelButton(!playing)
                                 .setCancelButtonIntent(closePending)
                 )
-                // Slot 0: Like (heart)
-                .addAction(isCurrentLiked ? R.drawable.ic_heart_filled : R.drawable.ic_heart_outline,
-                        isCurrentLiked ? "Unlike" : "Like", likePending)
-                // Slot 1: Previous
+                // Slot 0: Previous
                 .addAction(R.drawable.ic_media_previous, "Previous", prevPending)
-                // Slot 2: Play/Pause
+                // Slot 1: Play/Pause
                 .addAction(playing ? R.drawable.ic_media_pause : R.drawable.ic_media_play,
                         playing ? "Pause" : "Play", playPausePending)
-                // Slot 3: Next
+                // Slot 2: Next
                 .addAction(R.drawable.ic_media_next, "Next", nextPending)
+                // Slot 3: Like (heart) — overflow on the modern media UI, visible on stock shade
+                .addAction(isCurrentLiked ? R.drawable.ic_heart_filled : R.drawable.ic_heart_outline,
+                        isCurrentLiked ? "Unlike" : "Like", likePending)
                 // Slot 4: Close/Dismiss
                 .addAction(R.drawable.ic_notif_close, "Close", closePending);
 
@@ -1099,7 +1179,7 @@ public class AudenicPlaybackService extends Service {
             }
         }
 
-        startForeground(NOTIFICATION_ID, builder.build());
+        publishNotification(builder.build());
     }
 
     public void handleNotificationAction(String action) {
@@ -1127,8 +1207,7 @@ public class AudenicPlaybackService extends Service {
                     break;
                 case ACTION_STOP:
                     pause();
-                    stopForeground(true);
-                    stopSelf();
+                    endForegroundState(true);
                     break;
             }
         });

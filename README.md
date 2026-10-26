@@ -215,7 +215,8 @@ Tracked in detail in [HANDOVER.md](HANDOVER.md):
 - **Effects with no `audiofx` equivalent** — delay, DJ filter sweep and the three EQ kills are Web-Audio only, so they are silent on Android.
 - **Flanger** — exposed in the effects state but not implemented on any platform yet.
 - **Native reverb fidelity** — `PresetReverb` offers four coarse presets against the four generated convolution impulses used on web.
-- **`targetSdk 36` behaviour changes** — edge-to-edge enforcement and `RECEIVER_EXPORTED` flags need a pass on real devices.
+- **`targetSdk 36` behaviour changes** — edge-to-edge enforcement makes the status/nav-bar colour calls in `MainActivity` no-ops, and `usesCleartextTraffic="true"` is on Android 17's deprecation path; both need a pass on real devices.
+- **Android 17 background-audio hardening** — playback is compliant today (explicit `mediaPlayback` foreground-service type, media3 audio focus, wake lock, `POST_NOTIFICATIONS` requested on the play path), but it has never been exercised against `adb shell cmd audio set-enable-hardening enable`. That check, and the targetSdk-37 while-in-use requirement, are still outstanding — see HANDOVER.md.
 - **Duplicate native plugins** — `AudenicMedia` is live; the older `AudenicPlayback` plugin is registered but unused and should be retired.
 - **Duplicated native sources** — `native/android/*.java` are bootstrap copies that have drifted behind the live files under `android/app/src/main/java/fm/audenic/app/`. Re-running the documented copy step there would silently drop the wakelock, prev-command and reverb fixes; refresh or delete those copies first. That guide also quotes media3 `1.4.1` while the app builds against `1.3.1`.
 - **On-device verification** — the latest playback, wakelock and reverb work is code-complete and type-checks clean, but has not yet been exercised on physical Android hardware.

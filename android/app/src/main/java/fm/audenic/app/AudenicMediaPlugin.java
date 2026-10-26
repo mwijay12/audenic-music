@@ -42,6 +42,10 @@ import org.json.JSONObject;
         @Permission(
             alias = "readStorage",
             strings = { Manifest.permission.READ_EXTERNAL_STORAGE }
+        ),
+        @Permission(
+            alias = "postNotifications",
+            strings = { Manifest.permission.POST_NOTIFICATIONS }
         )
     }
 )
@@ -130,6 +134,41 @@ public class AudenicMediaPlugin extends Plugin {
     } else {
       call.reject("PERMISSION_DENIED", "Storage permission is required to scan media");
     }
+  }
+
+  /**
+   * Ensures POST_NOTIFICATIONS is granted. Without it, Android 13+ suppresses the
+   * mediaPlayback foreground-service notification entirely, which also removes the
+   * lock-screen / notification-shade media controls. Previously this was only requested
+   * from the onboarding flow, so anyone who skipped onboarding lost lock-screen controls.
+   * Safe to call repeatedly — Android only shows the dialog while the permission is undetermined.
+   */
+  @PluginMethod
+  public void requestNotifications(PluginCall call) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+      // Pre-Android 13: notification permission is installed-granted, nothing to ask.
+      JSObject granted = new JSObject();
+      granted.put("granted", true);
+      call.resolve(granted);
+      return;
+    }
+    if (ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS)
+        == PackageManager.PERMISSION_GRANTED) {
+      JSObject granted = new JSObject();
+      granted.put("granted", true);
+      call.resolve(granted);
+      return;
+    }
+    requestPermissionForAlias("postNotifications", call, "notificationsPermissionCallback");
+  }
+
+  @PermissionCallback
+  private void notificationsPermissionCallback(PluginCall call) {
+    boolean granted = ContextCompat.checkSelfPermission(getContext(), Manifest.permission.POST_NOTIFICATIONS)
+        == PackageManager.PERMISSION_GRANTED;
+    JSObject ret = new JSObject();
+    ret.put("granted", granted);
+    call.resolve(ret);
   }
 
   private void doScan(PluginCall call) {

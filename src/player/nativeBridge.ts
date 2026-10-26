@@ -142,6 +142,19 @@ export async function nativeUpdatePosition(positionMs: number, durationMs: numbe
   } catch { return false; }
 }
 
+/** Requests POST_NOTIFICATIONS natively so the mediaPlayback notification (and therefore the
+ *  lock-screen controls) is not suppressed on Android 13+. Must run on a user-initiated play
+ *  while the app is visible — Android 17 additionally grants while-in-use capability only then. */
+export async function ensureNotificationPermission(): Promise<boolean> {
+  if (!isNative()) return true;
+  try {
+    const plugin = (window as CapWindow).Capacitor?.Plugins?.AudenicMedia;
+    if (!plugin?.requestNotifications) return false;
+    const r = await plugin.requestNotifications({}) as { granted?: boolean };
+    return !!r.granted;
+  } catch { return false; }
+}
+
 /** Load and start playing an entire track queue in native ExoPlayer.
  *  Prefers the new AudenicPlayback plugin (granular setQueueAndPlay) and
  *  falls back to the legacy AudenicMedia.loadQueue path. */
@@ -151,6 +164,8 @@ export async function loadQueueNative(
   startPosMs = 0
 ) {
   if (!isNative()) return false;
+
+  await ensureNotificationPermission();
 
   // Try the primary AudenicPlayback plugin
   try {
