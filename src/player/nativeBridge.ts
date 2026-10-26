@@ -196,6 +196,17 @@ export async function setNativeEqualizer(bands: number[], bassBoost = 0) {
   } catch { return false; }
 }
 
+/** Set native ExoPlayer aux-effect PresetReverb (wet 0-100, type: hall|room|plate|cathedral). */
+export async function setNativeReverb(wetPct: number, type = "hall") {
+  if (!isNative()) return false;
+  try {
+    const plugin = (window as CapWindow).Capacitor?.Plugins?.AudenicMedia;
+    if (!plugin?.setReverb) return false;
+    await plugin.setReverb({ wet: wetPct, type });
+    return true;
+  } catch { return false; }
+}
+
 /** Listen to native lockscreen / notification / ExoPlayer play/pause/next/prev/seek/trackChanged events */
 export type NativePlaybackEvent = { action: string; position?: number; duration?: number; trackId?: string; index?: number };
 export function listenNativePlayback(callback: (event: NativePlaybackEvent) => void) {

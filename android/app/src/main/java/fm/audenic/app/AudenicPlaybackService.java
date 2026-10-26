@@ -18,6 +18,7 @@ import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.media.audiofx.BassBoost;
 import android.media.audiofx.Equalizer;
+import android.media.audiofx.PresetReverb;
 import android.net.Uri;
 import android.os.Binder;
 import android.os.Build;
@@ -25,6 +26,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.PowerManager;
 import android.support.v4.media.MediaMetadataCompat;
 import android.support.v4.media.session.MediaSessionCompat;
 import android.support.v4.media.session.PlaybackStateCompat;
@@ -102,13 +104,50 @@ public class AudenicPlaybackService extends Service {
     private PlaybackEventListener eventListener;
     private Equalizer equalizer;
     private BassBoost bassBoostFx;
+    private PresetReverb reverbFx;
     private int activeAudioSessionId = -1;
+    private int activeReverbSessionId = -1;
     private boolean isCurrentLiked = false;
 
     private final ExecutorService artLoader = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable progressRunnable;
     private Bitmap currentCoverBitmap;
+
+    // Background playback stability: partial WakeLock keeps the CPU alive for
+    // audio decoding/MediaSession callbacks even when the screen is off or the
+    // OEM tries to aggressively idle the app (Xiaomi/Huawei/Samsung battery savers).
+    private PowerManager.WakeLock wakeLock;
+
+    private void acquireWakeLockIfNeeded() {
+        try {
+            if (wakeLock == null) {
+                PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+                if (pm != null) {
+                    wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AudenicPlayback:wakelock");
+                    wakeLock.setReferenceCounted(false);
+                }
+            }
+            if (wakeLock != null && !wakeLock.isHeld()) {
+                // 10 min safety timeout; renewed on every play()/track change so it
+                // never actually expires during continuous playback, but it protects
+                // against a leaked lock if release() is ever missed.
+                wakeLock.acquire(10 * 60 * 1000L);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to acquire WakeLock: " + e.getMessage());
+        }
+    }
+
+    private void releaseWakeLockIfHeld() {
+        try {
+            if (wakeLock != null && wakeLock.isHeld()) {
+                wakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to release WakeLock: " + e.getMessage());
+        }
+    }
 
     private void runOnMainThread(Runnable runnable) {
         if (Looper.myLooper() == Looper.getMainLooper()) {
@@ -264,6 +303,7 @@ public class AudenicPlaybackService extends Service {
                     skipToNext();
                     break;
                 case "prev":
+                case "previous":
                     skipToPrev();
                     break;
                 case "like":
@@ -401,6 +441,63 @@ public class AudenicPlaybackService extends Service {
         });
     }
 
+    /**
+     * Native reverb (hall/room/plate/cathedral) applied directly on ExoPlayer's
+     * audio session via android.media.audiofx.PresetReverb. Mirrors setNativeEq's
+     * session-gated create/reuse pattern so this works alongside the Equalizer/BassBoost
+     * effects on the same audio session.
+     *
+     * @param wetPct 0..100 — 0 disables the effect entirely (saves CPU).
+     * @param type   one of "hall", "room", "plate", "cathedral" (maps to a PresetReverb preset).
+     */
+    public void setNativeReverb(int wetPct, String type) {
+        runOnMainThread(() -> {
+            if (player == null) return;
+            int audioSessionId = player.getAudioSessionId();
+            if (audioSessionId == 0) return;
+            try {
+                if (wetPct <= 0) {
+                    if (reverbFx != null) {
+                        reverbFx.setEnabled(false);
+                    }
+                    return;
+                }
+                if (reverbFx == null || activeReverbSessionId != audioSessionId) {
+                    if (reverbFx != null) {
+                        reverbFx.release();
+                        reverbFx = null;
+                    }
+                    reverbFx = new PresetReverb(0, audioSessionId);
+                    activeReverbSessionId = audioSessionId;
+                }
+                short preset;
+                switch (type == null ? "hall" : type) {
+                    case "room":
+                        preset = PresetReverb.PRESET_MEDIUMROOM;
+                        break;
+                    case "plate":
+                        preset = PresetReverb.PRESET_PLATE;
+                        break;
+                    case "cathedral":
+                        preset = PresetReverb.PRESET_LARGEHALL;
+                        break;
+                    case "hall":
+                    default:
+                        preset = PresetReverb.PRESET_MEDIUMHALL;
+                        break;
+                }
+                reverbFx.setPreset(preset);
+                reverbFx.setEnabled(true);
+                // PresetReverb has no direct wet/dry mix control; ExoPlayer's send level
+                // (set via Player.setAuxEffectInfo) controls how much signal reaches it.
+                float sendLevel = Math.max(0, Math.min(100, wetPct)) / 100f;
+                player.setAuxEffectInfo(new androidx.media3.common.AuxEffectInfo(reverbFx.getId(), sendLevel));
+            } catch (Exception e) {
+                Log.w(TAG, "Error setting native reverb: " + e.getMessage());
+            }
+        });
+    }
+
     @Nullable
     @Override
     public IBinder onBind(Intent intent) {
@@ -413,6 +510,7 @@ public class AudenicPlaybackService extends Service {
             if (mainHandler != null && progressRunnable != null) {
                 mainHandler.removeCallbacks(progressRunnable);
             }
+            releaseWakeLockIfHeld();
             if (equalizer != null) {
                 equalizer.release();
                 equalizer = null;
@@ -420,6 +518,10 @@ public class AudenicPlaybackService extends Service {
             if (bassBoostFx != null) {
                 bassBoostFx.release();
                 bassBoostFx = null;
+            }
+            if (reverbFx != null) {
+                reverbFx.release();
+                reverbFx = null;
             }
             if (player != null) {
                 player.release();
@@ -434,6 +536,32 @@ public class AudenicPlaybackService extends Service {
             Log.d(TAG, "AudenicPlaybackService destroyed");
         });
         super.onDestroy();
+    }
+
+    /**
+     * Called when the user removes the app from the recents/task list (swipes it away).
+     * Without this override, some OEM skins (Xiaomi MIUI, Huawei EMUI, Samsung
+     * "Device care") treat a removed task as a signal to kill the whole process,
+     * including this foreground service, which stops background audio abruptly.
+     *
+     * We keep the service + notification alive when music is actively playing
+     * (the whole point of background playback), and only let the service wind
+     * down naturally if playback was already paused/stopped.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        super.onTaskRemoved(rootIntent);
+        Log.d(TAG, "onTaskRemoved: app task removed, isPlaying=" + isPlaying());
+        if (!isPlaying()) {
+            // Nothing is playing — safe to let the service stop like a normal app close.
+            runOnMainThread(() -> {
+                releaseWakeLockIfHeld();
+                stopForeground(true);
+                stopSelf();
+            });
+        }
+        // else: keep playing in the background; START_STICKY + foreground notification
+        // + WakeLock (acquired in play()/playTrackAtIndex()) keep the process+service alive.
     }
 
     private void initExoPlayer() {
@@ -630,6 +758,7 @@ public class AudenicPlaybackService extends Service {
                     player.setMediaItem(item);
                     player.prepare();
                     player.play();
+                    acquireWakeLockIfNeeded();
                     loadCoverAndRefresh(track);
                     if (eventListener != null) {
                         eventListener.onTrackChanged(currentIndex, track);
@@ -733,6 +862,7 @@ public class AudenicPlaybackService extends Service {
     public void play() {
         runOnMainThread(() -> {
             isJsPlaying = true;
+            acquireWakeLockIfNeeded();
             if (player != null) {
                 player.play();
             }
@@ -745,6 +875,7 @@ public class AudenicPlaybackService extends Service {
     public void pause() {
         runOnMainThread(() -> {
             isJsPlaying = false;
+            releaseWakeLockIfHeld();
             if (player != null) {
                 player.pause();
             }

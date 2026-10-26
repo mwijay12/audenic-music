@@ -15,6 +15,7 @@ export type EngineState = {
 };
 
 import { audioEffectsRack } from "./audioEffects";
+import { isNative, setNativeReverb } from "./nativeBridge";
 
 class AudioEngine {
   ctx: AudioContext | null = null;
@@ -151,6 +152,11 @@ class AudioEngine {
 
   /** Reverb connected ONLY when percentage > 0 to prevent CPU load */
   setReverb(pct: number) {
+    if (isNative()) {
+      // On native Android, WebAudio output is muted — route reverb through
+      // ExoPlayer's native PresetReverb aux-effect instead.
+      setNativeReverb(Math.max(0, Math.min(100, pct)), "hall").catch(() => {});
+    }
     if (!this.ctx || !this.bass || !this.master) return;
     const w = Math.max(0, Math.min(100, pct)) / 100;
     if (w <= 0) {

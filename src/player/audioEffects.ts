@@ -11,6 +11,8 @@
  * - 3-Band DJ EQ with Instant Kill switches (Low Kill, Mid Kill, High Kill)
  */
 
+import { isNative, setNativeReverb } from "./nativeBridge";
+
 export type ReverbType = "hall" | "room" | "plate" | "cathedral";
 
 export interface AudioEffectsState {
@@ -189,11 +191,17 @@ class AudioEffectsRack {
   }
 
   setReverb(wetPct: number, type: ReverbType = "hall") {
+    if (isNative()) {
+      // Native Android: WebAudio is muted, route through ExoPlayer's
+      // native PresetReverb aux-effect instead.
+      setNativeReverb(Math.max(0, Math.min(100, wetPct)), type).catch(() => {});
+    }
+    const typeChanged = type !== this.state.reverbType;
     this.state.reverbWet = wetPct;
     this.state.reverbType = type;
     if (!this.ctx || !this.reverbGain || !this.convolver) return;
 
-    if (type !== this.state.reverbType) {
+    if (typeChanged) {
       const duration = type === "cathedral" ? 3.5 : type === "room" ? 1.0 : type === "plate" ? 1.8 : 2.2;
       const decay = type === "room" ? 3.5 : 2.0;
       this.convolver.buffer = this.buildImpulse(duration, decay, type);

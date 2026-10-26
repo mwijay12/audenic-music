@@ -503,6 +503,18 @@ public class AudenicMediaPlugin extends Plugin {
   }
 
   @PluginMethod
+  public void setReverb(PluginCall call) {
+    int wetPct = call.getInt("wet", 0);
+    String type = call.getString("type", "hall");
+
+    AudenicPlaybackService svc = AudenicPlaybackService.getInstance();
+    if (svc != null) {
+      svc.setNativeReverb(wetPct, type);
+    }
+    call.resolve();
+  }
+
+  @PluginMethod
   public void updateNotification(PluginCall call) {
     String title = call.getString("title", "Audenic");
     String artist = call.getString("artist", "");

@@ -871,7 +871,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         })),
         trackIdx >= 0 ? trackIdx : 0,
         Math.floor((a.currentTime || 0) * 1000)
-      ).catch(() => {});
+      ).catch((e) => console.warn("[PlayerContext] loadQueueNative failed:", e));
     }
 
     if (!autoplay) return;
@@ -927,7 +927,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         engine.resume();
         if (isNative()) nativePlayback("play");
         // On native, ExoPlayer is already loaded — just resume it, don't re-load the queue
-        if (isNative()) { a.play().catch(() => {}); setPlaying(true); }
+        if (isNative()) { a.play().catch((e) => console.warn("[PlayerContext] resume play() failed:", e)); setPlaying(true); }
         else loadAndPlay(t, true, false, startTime);
       }
       else fadeTo(0, Math.min(fadeMs, 400), () => { a.pause(); if (isNative()) nativePlayback("pause"); setPlaying(false); });
@@ -946,7 +946,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       engine.resume();
       if (isNative()) nativePlayback("play");
       // On native, ExoPlayer is already loaded — just resume it, don't re-load the queue
-      if (isNative()) { a.play().catch(() => {}); setPlaying(true); }
+      if (isNative()) { a.play().catch((e) => console.warn("[PlayerContext] toggle play() failed:", e)); setPlaying(true); }
       else loadAndPlay(current, true, false);
     }
     else fadeTo(0, Math.min(fadeMs, 400), () => { a.pause(); if (isNative()) nativePlayback("pause"); setPlaying(false); });
@@ -959,6 +959,11 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     let i = pool.indexOf(currentId ?? "");
     if (i < 0) i = 0;
     let n: number;
+    // Fast-path eligibility: only when the order is strictly sequential (no
+    // shuffle / smart-queue reordering) — in that case the native queue
+    // (already loaded via loadQueueNative) is in the exact same order, so we
+    // can ask it to advance directly instead of reloading the whole queue.
+    const sequentialOrder = !shuffle && !(smartQueue && dir === 1 && tracks.length > 2);
     if (shuffle) {
       do { n = Math.floor(Math.random() * pool.length); } while (pool.length > 1 && n === i);
     } else if (smartQueue && dir === 1 && tracks.length > 2) {
@@ -971,17 +976,32 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     } else n = (i + dir + pool.length) % pool.length;
     const id = pool[n];
     const t = tracks.find((x) => x.id === id) || (externalTrack?.id === id ? externalTrack : undefined);
-    if (t) {
-      addRecent(t.id);
-      if (isPlaying && crossfade) {
-        fadeTo(0, fadeMs / 2, () => {
-          setCurrentId(t.id);
-          loadAndPlay(t, true, true);
-        });
-      } else {
+    if (!t) return;
+    addRecent(t.id);
+
+    // Fast path: on native, if we're simply moving one step without wrapping
+    // around the ends of the queue, just send the lightweight native
+    // next/previous command — ExoPlayer already has the full queue loaded,
+    // so this avoids a full reload (which caused laggy/unreliable button taps).
+    // The UI (currentId/progress/playing) updates via the "trackChanged"
+    // native event handler (onTrackChanged) once ExoPlayer confirms the switch.
+    const seqIdx = i + dir;
+    const isAdjacentNoWrap = seqIdx >= 0 && seqIdx < pool.length && seqIdx === n;
+    if (isNative() && sequentialOrder && isAdjacentNoWrap) {
+      nativePlayback(dir === 1 ? "next" : "previous").catch((e) =>
+        console.warn("[PlayerContext] nativePlayback step command failed:", e)
+      );
+      return;
+    }
+
+    if (isPlaying && crossfade) {
+      fadeTo(0, fadeMs / 2, () => {
         setCurrentId(t.id);
         loadAndPlay(t, true, true);
-      }
+      });
+    } else {
+      setCurrentId(t.id);
+      loadAndPlay(t, true, true);
     }
   }, [queueIds, tracks, currentId, externalTrack, shuffle, smartQueue, recentlyPlayed, playCounts, isPlaying, crossfade, fadeMs, fadeTo, loadAndPlay, addRecent, buzz]);
 
@@ -991,7 +1011,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
     const a = audioRef.current!;
     if (repeat) {
       a.currentTime = 0;
-      Promise.resolve(a.play()).catch(() => {});
+      Promise.resolve(a.play()).catch((e) => console.warn("[PlayerContext] repeat play() failed:", e));
       return;
     }
     // On native, ExoPlayer auto-advances to the next track and fires
@@ -1064,7 +1084,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
         if (a) {
           const safeSrc = getSafeAudioSrc(t as any) || t.src;
           if (safeSrc && a.src !== safeSrc) { a.src = safeSrc; a.load(); }
-          a.play().catch(() => {});
+          a.play().catch((e) => console.warn("[PlayerContext] trackChanged sync play() failed:", e));
         }
       }
     },
@@ -1075,7 +1095,7 @@ export function PlayerProvider({ children }: { children: React.ReactNode }) {
       setError(null);
       const a = audioRef.current;
       if (a && a.paused) {
-        a.play().catch(() => {});
+        a.play().catch((e) => console.warn("[PlayerContext] onNativePlay sync play() failed:", e));
       }
     },
     onNativePause: () => {
