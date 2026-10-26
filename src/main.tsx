@@ -7,6 +7,37 @@ import App from "./App";
 
 console.log("Main.tsx: Script started");
 
+/**
+ * URIError ("URI malformed") is thrown by encodeURI/decodeURI internals — most
+ * often by Capacitor converting a media path that contains a bare "%". These
+ * used to bubble up as uncaught render errors and blank the player. Swallow the
+ * URIError family specifically (log a breadcrumb for diagnostics) so one bad
+ * path can never take the whole screen down. Every other error still surfaces.
+ */
+function isUriError(e: unknown): boolean {
+  const err = e as { name?: string; message?: string } | null;
+  return !!err && (err.name === "URIError" || /URI malformed|malformed URI/i.test(err.message || ""));
+}
+try {
+  window.addEventListener("error", (ev) => {
+    if (isUriError(ev.error) || /URI malformed/i.test(ev.message || "")) {
+      try {
+        localStorage.setItem("au.lastUriError", JSON.stringify({
+          msg: ev.message || String(ev.error),
+          at: Date.now(),
+        }));
+      } catch { /* ignore */ }
+      ev.preventDefault();
+    }
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    if (isUriError(ev.reason)) {
+      try { localStorage.setItem("au.lastUriError", JSON.stringify({ msg: String(ev.reason), at: Date.now() })); } catch { /* ignore */ }
+      ev.preventDefault();
+    }
+  });
+} catch { /* ignore */ }
+
 import { AuthProvider } from "./auth/AuthContext";
 
 function Root() {

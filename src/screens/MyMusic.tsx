@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, useEffect, useCallback } from "react";
 import { LIBRARY_CHIPS } from "../data/tracks";
 import { usePlayer, svgCover } from "../player/PlayerContext";
-import { Chip, IconButton, StatusBar, TrackRow } from "../components/Shell";
+import { Chip, IconButton, StatusBar, TrackRow, RowBoundary } from "../components/Shell";
 import { Back, Dots, Scan, Shuffle, Video, Play, Plus, Search, CheckSquare, Filter, Check } from "../components/Icons";
 import { isNative } from "../player/nativeBridge";
 import { isDesktop } from "../player/tauriBridge";
@@ -460,6 +460,7 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
             className="px-6 h-full"
             onScrollChange={(top) => { setIsScrolled(top > 25); setScrollTop(top); }}
             renderItem={(t) => (
+              <RowBoundary key={t.id}>
               <TrackRow
                 key={t.id}
                 track={t}
@@ -480,6 +481,7 @@ export default function MyMusic({ onBack, onOpenPlayer, onOpenVideo, onOpenSetti
                   })
                 }
               />
+              </RowBoundary>
             )}
             empty={<p className="py-12 text-center text-[13px] text-white/35">{chip === "Local Files" ? "No local songs yet — tap Scan." : "Nothing here."}</p>}
           />

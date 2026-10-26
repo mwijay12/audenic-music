@@ -94,6 +94,9 @@ export function VirtualList<T>({
 
   const visibleItems = [];
   for (let i = startIdx; i < endIdx; i++) {
+    // The item list can shrink between a scroll event and this render (filter,
+    // folder switch, delete) — never dereference a missing entry.
+    if (i >= items.length || items[i] === undefined) continue;
     visibleItems.push(
       <div
         key={i}

@@ -134,12 +134,43 @@ export function FillSlider({ value, min, max, step, onChange }: { value: number;
   );
 }
 
+/**
+ * Isolates a single list row. If one track's artwork/path throws while
+ * rendering, that row renders empty instead of unmounting the whole screen —
+ * scrolling a 300+ song library must never be able to crash the app.
+ */
+export class RowBoundary extends React.Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(err: unknown) {
+    console.warn("[RowBoundary] row failed:", (err as Error)?.message);
+  }
+  render() {
+    return this.state.failed ? null : this.props.children;
+  }
+}
+
+/**
+ * Escape characters that break URI decoding inside the WebView, without
+ * mangling query strings on real URLs:
+ *  - a bare "%" (not part of %XX) is always escaped
+ *  - "#" and "?" only for local paths, where they are literal filename chars
+ */
+function sanitizeImgSrc(u?: string): string {
+  if (!u) return "";
+  if (u.startsWith("data:") || u.startsWith("blob:")) return u;
+  const escaped = u.replace(/%(?![0-9A-Fa-f]{2})/g, "%25");
+  if (/^https?:\/\//i.test(escaped)) return escaped;
+  return escaped.replace(/#/g, "%23").replace(/\?/g, "%3F");
+}
+
 export function SafeImage({ src, fallbackText = "Song", className = "", style, alt = "" }: { src?: string; fallbackText?: string; className?: string; style?: React.CSSProperties; alt?: string }) {
   const fallbackSrc = useMemo(() => svgCover(fallbackText, 0), [fallbackText]);
-  const [imgSrc, setImgSrc] = useState(src || fallbackSrc);
+  const safe = sanitizeImgSrc(src);
+  const [imgSrc, setImgSrc] = useState(safe || fallbackSrc);
 
   useEffect(() => {
-    setImgSrc(src || fallbackSrc);
+    setImgSrc(sanitizeImgSrc(src) || fallbackSrc);
   }, [src, fallbackSrc]);
 
   return (
