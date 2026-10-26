@@ -1,3 +1,8 @@
+> **START HERE (new agents):** this file covers the *original* takeover state.
+> For the current, full frontend+backend map, environment setup, gotchas and
+> open issues, read **[AGENT_HANDOVER.md](AGENT_HANDOVER.md)** first, then come
+> back here for historical context.
+
 # Audenic Music — Handover (state of the 3 fixes + API 36 bump)
 
 Stack: **Capacitor v6 + React 19 + TypeScript** Android app. `appId com.audenic.app`, `webDir dist`.
