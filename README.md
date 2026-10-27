@@ -87,7 +87,7 @@ service: [AudenicPlaybackService.java](android/app/src/main/java/fm/audenic/app/
 | Linux | Tauri 2 | Supported, CI-built (AppImage, deb) |
 | Web / PWA | Vite build | Supported |
 | iOS | — | Not configured |
-| Flutter rewrite (`audenic_flutter/`) | — | Abandoned, kept for reference only |
+| Flutter rewrite | Planned | Old abandoned tree deleted; see [FLUTTER_MIGRATION.md](FLUTTER_MIGRATION.md) |
 
 ---
 

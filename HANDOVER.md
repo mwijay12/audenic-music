@@ -6,7 +6,9 @@
 # Audenic Music — Handover (state of the 3 fixes + API 36 bump)
 
 Stack: **Capacitor v6 + React 19 + TypeScript** Android app. `appId com.audenic.app`, `webDir dist`.
-Native layer is **100% Java, zero Kotlin**. Ignore `audenic_flutter/` — the Flutter rewrite was abandoned.
+Native layer is **100% Java, zero Kotlin** (for the Capacitor app).
+
+> **Update 2026-10-27:** the owner now wants the app in **Flutter**. `audenic_flutter/` has been deleted (recoverable at `71448e0`). Migration plan: **[FLUTTER_MIGRATION.md](FLUTTER_MIGRATION.md)**.
 
 ## DONE (code merged, unverified on device)
 
@@ -174,5 +176,5 @@ user who skipped onboarding** (the `POST_NOTIFICATIONS` path added this round).
 - **~~Duplicated + drifted native sources~~ (done)**: the stale `native/android/` bootstrap template (`AudenicMediaPlugin.java`, `AudenicPlaybackService.java`, `README.md` — hundreds of lines behind the live files and quoting media3 `1.4.1` against the real `1.3.1`) has been deleted (moved to `.trash/`). README.md's repo-layout and known-limitations sections updated to match. If re-adding the Android platform, copy straight from `android/app/src/main/java/fm/audenic/app/`.
 - **EQ unit mismatch to confirm**: web passes 5 band values into native `setNativeEq(int[] bandLevels, ...)` while Android `Equalizer` works in millibels over device-specific band counts/ranges. Verify scaling and clamping on at least two OEM devices, and map web band count → device band count.
 - **~~License conflict~~ (resolved)**: `README.md`'s License section and `LICENSE` both now state the Altraware Technologies Proprietary License (commit `c50055f`); no stray MIT text remains anywhere in the repo (verified by repo-wide grep). No further owner decision needed on this point.
-- `audenic_flutter/` and `src-tauri/` (desktop) — decide keep or delete.
+- `src-tauri/` (desktop) — decide keep or delete. (`audenic_flutter/` was deleted on 2026-10-27.)
 - Smart Automix / DJ crossfade (`smartAutomix.ts`) runs entirely on Web Audio, so it is inert on native; automix on Android needs either the native queue's own gapless/crossfade or an accepted feature-reduction.

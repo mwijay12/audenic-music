@@ -9,8 +9,8 @@
 
 | Rule | Detail |
 |---|---|
-| **Stack** | Capacitor v6 + React 19 + TypeScript + Vite. Native Android layer is **100% Java** (no Kotlin). |
-| **NOT Flutter** | No `pubspec.yaml`, no Dart. Never scaffold or migrate to Flutter. |
+| **Stack (shipping today)** | Capacitor v6 + React 19 + TypeScript + Vite; native Android layer is **100% Java** (no Kotlin). |
+| **Target stack (owner decision, 2026-10-27)** | **Flutter.** The owner has asked to move the app to Flutter. The old abandoned `audenic_flutter/` tree was deleted from `main` (recoverable at commit `71448e0`); do **not** resurrect it wholesale. Follow **[FLUTTER_MIGRATION.md](FLUTTER_MIGRATION.md)**. Until the Flutter app reaches parity, the Capacitor app stays shippable — keep both working. |
 | **Honesty** | Never claim a native/Java change is tested without actually compiling it. |
 | **Private** | Never publish to a store, never make the repo public, never add marketing. |
 | **Delivery** | "push to GitHub" = push to the existing private repo on `main`. |
